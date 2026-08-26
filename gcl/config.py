@@ -86,6 +86,10 @@ class ExperimentConfig:
     # output
     out_dir: str = "runs/run"
     seed: int = 42
+    torch_seed: int = 0               # 0 = unseeded (legacy runs); >0 => seed
+                                      # torch/cuda/numpy/random per learner
+                                      # (torch_seed + learner index) for
+                                      # reproducible certification sampling
     # rl / flags (honest GRPO: only if trl present + explicitly enabled)
     enable_grpo: bool = False
 

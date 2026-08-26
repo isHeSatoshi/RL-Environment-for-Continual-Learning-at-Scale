@@ -109,6 +109,16 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
             continue
         print(f"\n[GCL] === Starting Learner {idx + 1}/{len(learner_names)}: {name} ===", flush=True)
         cfg._learner_name = name  # also enable bounded-update knobs scoped to this learner
+        _ts = int(getattr(cfg, "torch_seed", 0))
+        if _ts:  # 0 keeps legacy unseeded behaviour (bit-compat with old runs)
+            import random as _pyrandom
+            import numpy as _np
+            _pyrandom.seed(_ts + idx)
+            _np.random.seed(_ts + idx)
+            torch.manual_seed(_ts + idx)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(_ts + idx)
+            print(f"[GCL] [{name}] RNG seeded (torch_seed={_ts} + idx {idx})", flush=True)
         engine = TrainingEngine(cfg, adapter_root=os.path.join(out_dir, f"adapters_{name}"))
         verifier = Verifier(sandbox=PythonSandbox())
         learner = LEARNERS[name](cfg)

@@ -1,5 +1,5 @@
 {
-  "_comment": "DRAFT — launch only after runs/sccl_v2 analysis justifies it. SCCL v3 candidate: PROBE CURRICulum on top of v2. Hypothesis: residual forgetting (if any after v2) is unvisited-generalization loss; probes are manufactured, certified generalization instances — graduating the ones that survive RRV checks into certified rehearsal pairs trains the model on the generalization neighborhood itself, while fresher probes keep guarding the frontier as untrained checks. Fully gold-free: promotion is vault-internal bookkeeping over entries already certified + re-verified by regeneration. Ladder: frozen < sccl_v2 (v2 ref) < sccl_promote (v2 + curriculum) < vsr_nogold (gold-test reference). Same stream/hash as sccl_main & sccl_v2.",
+  "_comment": "DRAFT — launch only after runs/sccl_v2 analysis justifies it. SCCL v3 candidate: PROBE CURRICULUM on top of v2. Hypothesis: residual forgetting (if any after v2) is unvisited-generalization loss; probes are manufactured, certified generalization instances — graduating the ones that survive RRV checks into certified rehearsal pairs trains the model on the generalization neighborhood itself, while fresher probes keep guarding the frontier as untrained checks. Fully gold-free: promotion is vault-internal bookkeeping over entries already certified + re-verified by regeneration. Seeded regime (torch_seed=42) for reproducible certification sampling — the unseeded sccl_v2 rerun showed run-to-run variance (v1 sccl: 0.637 original vs 0.744 rerun), so this ladder includes a SEEDED v1 'sccl' reference row; compare rows WITHIN this ladder. Ladder: frozen < sccl (v1 ref) < sccl_v2 (v2 ref) < sccl_promote (v2 + curriculum) < vsr_nogold (gold-test reference). Same stream/hash as sccl_main & sccl_v2.",
   "stream": {
     "seed": 42,
     "families": [
@@ -27,7 +27,7 @@
     "vault_commit_min": 0.9,
     "vault_retrieve_k": 3,
     "vault_gate_check": 3,
-    "sccl_learners": ["sccl_v2", "sccl_promote"],
+    "sccl_learners": ["sccl", "sccl_v2", "sccl_promote"],
     "sccl_nogate_learners": [],
     "sccl_nocons_learners": [],
     "sccl_k": 6,
@@ -50,8 +50,9 @@
     "sccl_probe_promote_age": 2,
     "self_taught_learners": ["vsr_nogold"],
     "out_dir": "runs/sccl_v3",
-    "seed": 42
+    "seed": 42,
+    "torch_seed": 42
   },
-  "learners": ["frozen", "sccl_v2", "sccl_promote", "vsr_nogold"],
+  "learners": ["frozen", "sccl", "sccl_v2", "sccl_promote", "vsr_nogold"],
   "out_dir": "runs/sccl_v3"
 }
