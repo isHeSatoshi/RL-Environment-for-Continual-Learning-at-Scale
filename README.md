@@ -3,7 +3,9 @@
 **Status: Real Platform with Verified, Reproducible Continual Learning** — *Not a mock framework or production shell.*  
 A single GPU (e.g., RTX 4060 Ti 16GB or Kaggle T4) runs the entire pipeline: real PyTorch/PEFT LoRA weight updates, execution-grounded rewards, safe-gated model promotion, and measurable catastrophic forgetting — with every claim verifiable from logged execution artifacts.
 
-**New: Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a 24-test proof suite including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`).
+**New: Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a 46-test proof suite including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`).
+
+**SCCL v2 — self-manufactured stability.** A fine-grained diagnosis of v1 showed its residual forgetting is almost entirely *unvisited-generalization* loss (trained tasks retained, same-family holdouts collapse; math entries never gate-checked). v2 adds three gold-free mechanisms (`configs/sccl_v2.json`): **certified rehearsal** (every update also trains on stride-sampled pairs from the self-certified vault), **neighborhood probes** (at certification the model manufactures a certified spec variant — paraphrase + bidirectional cross-validation for code, numeric variant + majority vote for math — stored as `kind="probe"`, never trained on, re-checked by RRV so the gate protects a generalization neighborhood), and **math-RRV** (the veto extended to math vault entries via canonical-form answer matching). Probe manufacture is a spec-only API (`MakeProbe(engine, verifier, spec, domain, CertResult)`) covered by the same AST/signature/poisoned-gold audits. A v3 candidate — the **probe curriculum**, where probes that survive enough RRV checks graduate into certified rehearsal pairs — is implemented behind `sccl_probe_promote_*` flags (`configs/sccl_v3.json` draft).
 
 ---
 
@@ -165,16 +167,24 @@ To run the main SCCL continual learning experiment (8-learner ladder, 4 drift-in
 python -m gcl.runner --config configs/sccl_main.json
 ```
 
+SCCL v2 ladder (same stream/hash; certified rehearsal + neighborhood probes + math-RRV):
+
+```bash
+python -m gcl.runner --config configs/sccl_v2.json
+```
+
 Gold-free proof suite (AST audits, poisoned-gold adversarial tests, certification semantics):
 
 ```bash
 python -m pytest tests/test_sccl.py -v
 ```
 
-Regenerate paper tables and metrics from completed runs:
+Regenerate paper tables and metrics from completed runs (or use the one-shot
+`bash scripts/build_paper.sh`, which rebuilds both registries and compiles):
 
 ```bash
 python -m gcl.report --run runs/sccl_main --out paper/results.tex
+python -m gcl.report --run runs/sccl_v2 --out paper/results_v2.tex --prefix vtwo
 ```
 
 ### 4. Launch Interactive Web Dashboard
@@ -199,6 +209,7 @@ Experiments conducted on RTX 4060 Ti (16GB) and Kaggle T4 GPUs using `Qwen2.5-Co
   - Gold-assisted references: `vsr_nogold` (self-taught targets verified by *gold tests*) ACC **0.637** / forgetting **0.075**. Full gold supervision is *not* an upper bound: `vsr` (gold reference injection + gold skill-vault gate) lands at ACC **0.475** / forgetting **0.175** — below the frozen control — because training on external reference style over-forgets, and its gold gate fired **0** rollbacks across 25 updates. Gold helps when it verifies the model's own outputs; it hurts when it replaces them.
   - Zero-shot domain acquisition: the base model scores **0.0** on synthetic math; self-certified arithmetic transfers forward (math first-contact 0.625) and majority-vote certification bootstraps math to a **perfect holdout (1.0)** — a new domain learned end-to-end with no gold.
   - Ablations isolate each component: removing consensus (`sccl_nocons`) drops ACC to **0.581** and certification to 62%.
+- **SCCL v2 (self-manufactured stability)** — `runs/sccl_v2` reruns the identical stream end-to-end with `frozen`, `sccl` (v1 reference), `sccl_replay` (+certified rehearsal), `sccl_probe` (+probes/math-RRV), `sccl_v2` (all three), and `vsr_nogold`. Target: close v1's unvisited-generalization forgetting (arith holdout 0.15 vs trained 0.80) without touching gold. Per-family retention matrices and gate breakdowns: `python scripts/analyze_v2.py runs/sccl_v2 --ref runs/sccl_main`.
 - **Verification, Self-Reflection & Rehearsal (VSR)** hyperparameter search achieved peak ACC of **0.600** across lifelong distribution shifts.
 - **Holdout-Veto Safety Gate** prevented over 95% of potential catastrophic regressions by automatically identifying and rolling back updates that degraded holdout performance.
 - **Skill Vault Deduplication** reduced memory footprint and replay redundancy while maintaining positive backward transfer ($BWT \ge 0$).
