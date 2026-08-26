@@ -60,6 +60,22 @@ def _eval_family(engine, verifier, family, adapter_on=True) -> float:
     return float(sum(scores) / len(scores))
 
 
+def _eval_family_detail(engine, verifier, family, adapter_on=True):
+    """Same scoring as _eval_family plus per-task records, so failure modes can
+    be analyzed post-hoc without re-running GPU evaluation."""
+    recs = []
+    for t in (family.tasks or []):
+        txt = engine.generate(_build_prompt(t), adapter_on=adapter_on)
+        code = extract_code(txt) if t.domain == "code" else txt
+        r, info, _ = verifier.reward(domain=t.domain, code=code, test_code=t.test_code,
+                                     reference_answer=t.reference_answer)
+        recs.append({"task_id": getattr(t, "task_id", ""), "score": float(r),
+                     "pass_rate": float(info.get("pass_rate", 0.0)),
+                     "success": bool(info.get("success", False))})
+    mean = float(sum(x["score"] for x in recs) / len(recs)) if recs else 0.0
+    return mean, recs
+
+
 # incremental checkpointing: save after EVERY learner so a Kaggle/Lightning
 # timeout never wipes an entire run (Fix 1 from the diagnostic report).
 def _atomic_write_json(path: str, data: Dict[str, Any]) -> None:
@@ -134,7 +150,12 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
 
         # 1) true zero-shot baseline (adapter disabled == frozen base)
         print(f"[GCL] [{name}] Evaluating zero-shot baseline across {nF} families...", flush=True)
-        zero_shot = [_eval_family(engine, verifier, fam, adapter_on=False) for fam in families]
+        zero_shot_detail: Dict[str, Any] = {}
+        zero_shot = []
+        for fam in families:
+            s, recs = _eval_family_detail(engine, verifier, fam, adapter_on=False)
+            zero_shot.append(s)
+            zero_shot_detail[fam.name] = recs
         print(f"[GCL] [{name}] Zero-shot baseline scores: {[round(s, 3) for s in zero_shot]}", flush=True)
         first_contact = list(zero_shot)   # acc when family i is *first* evaluated during stream
 
@@ -299,9 +320,20 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         # 3) final eval — HELD-OUT (never shown during the stream) so accuracy reflects
         # retained general competence, not memorization of the training tasks.
         print(f"[GCL] [{name}] Stream complete! Evaluating final accuracy across all families (HELD-OUT + trained)...", flush=True)
-        final_trained = [_eval_family(engine, verifier, fam, adapter_on=True) for fam in families]
-        final_heldout = [_eval_family(engine, verifier, _FamilyProxy(f.name, f.holdout), adapter_on=True)
-                          if getattr(f, "holdout", None) else 0.0 for f in families]
+        final_trained, final_trained_detail = [], {}
+        for fam in families:
+            s, recs = _eval_family_detail(engine, verifier, fam, adapter_on=True)
+            final_trained.append(s)
+            final_trained_detail[fam.name] = recs
+        final_heldout, final_heldout_detail = [], {}
+        for f in families:
+            if getattr(f, "holdout", None):
+                s, recs = _eval_family_detail(engine, verifier, _FamilyProxy(f.name, f.holdout),
+                                              adapter_on=True)
+                final_heldout.append(s)
+                final_heldout_detail[f.name] = recs
+            else:
+                final_heldout.append(0.0)
         R = [[0.0] * nF for _ in range(2)]
         R[0] = list(zero_shot)          # before any learning (trained tasks)
         R[1] = list(final_trained)      # after the whole stream (trained)
@@ -323,6 +355,9 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         reports["learners"][name] = {
             "report": rep.to_dict(), "R_pairs": {"zero_shot": zero_shot, "first_contact": first_contact, "final": final_heldout,
                                                     "final_trained": final_trained},
+            "eval_detail": {"zero_shot": zero_shot_detail,
+                            "final_trained": final_trained_detail,
+                            "final_heldout": final_heldout_detail},
             "family_curve": fam_curve, "updates": updates, "rollbacks": rollbacks,
             "wallclock_s": round(time.time() - t0, 1), "trajectories": trajs_path,
             "frontier_score": round(frontier, 4),

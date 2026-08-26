@@ -81,6 +81,25 @@ def print_sccl_stats(m: Dict[str, Any], tag: str) -> None:
         )
 
 
+def print_failure_detail(m: Dict[str, Any], fam_names: List[str], tag: str) -> None:
+    """Per-task final-holdout failures (needs eval_detail; runs >= 2026-08-26)."""
+    any_detail = any("eval_detail" in d for d in m["learners"].values())
+    if not any_detail:
+        return
+    print(f"\n=== Failed final-holdout tasks: {tag} ===")
+    for name, d in m["learners"].items():
+        det = (d.get("eval_detail") or {}).get("final_heldout") or {}
+        if not det:
+            continue
+        parts = []
+        for fn in fam_names:
+            recs = det.get(fn) or []
+            failed = [r["task_id"] for r in recs if r.get("score", 0.0) < 0.999]
+            if failed:
+                parts.append(f"{fn}: {','.join(failed)}")
+        print(f"  {name:<14} " + ("; ".join(parts) if parts else "all holdouts pass"))
+
+
 def _gate_breakdown(traj_path: str) -> Dict[str, int]:
     counts = {"gated": 0, "accepted": 0, "vetoed": 0,
               "veto_skill": 0, "veto_probe": 0, "veto_math": 0,
@@ -171,6 +190,7 @@ def main() -> None:
     tag = os.path.basename(os.path.normpath(args.run_dir))
     print_leaderboard(m, ref, tag)
     print_family_matrix(m, fam_names, tag)
+    print_failure_detail(m, fam_names, tag)
     print_sccl_stats(m, tag)
     print_gate_breakdown(m, args.run_dir, tag)
     if ref and args.ref:
