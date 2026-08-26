@@ -24,16 +24,27 @@ def _macro(name: str, value: str) -> str:
     return f"\\newcommand{{\\{name}}}{{{value}}}"
 
 
-def write_results_tex(metrics_path: str, out_tex: str) -> Dict[str, Any]:
+# TeX control words stop at the first non-letter, so digit-bearing macro names
+# silently break (\scclv2acc tokenizes as \scclv + "2acc"). Spell digits out.
+_DIGIT_WORDS = dict(zip("0123456789", ["zero", "one", "two", "three", "four",
+                                        "five", "six", "seven", "eight", "nine"]))
+
+
+def _safe_name(name: str) -> str:
+    return "".join(_DIGIT_WORDS.get(ch, ch) for ch in name.replace("_", ""))
+
+
+def write_results_tex(metrics_path: str, out_tex: str, prefix: str = "") -> Dict[str, Any]:
     with open(metrics_path) as f:
         m = json.load(f)
     learners = m["learners"]
     lines = [MACRO_HEADER, ""]
     blocks = []
+    prefix = _safe_name(prefix)
 
     for name, d in learners.items():
         r = d["report"]
-        safe = name.replace("_", "")
+        safe = prefix + _safe_name(name)
         lines.append(f"% --- learner: {name} ---")
         lines.append(_macro(f"{safe}acc", _fmt(r["acc"])))
         lines.append(_macro(f"{safe}bwt", _sign(r["bwt"])))
@@ -58,14 +69,17 @@ def write_results_tex(metrics_path: str, out_tex: str) -> Dict[str, Any]:
             lines.append(_macro(f"{safe}recallrate", _fmt(vs.get("recall_rate", 0.0))))
         lines.append("")
 
+    # Global (non-learner) macros only from the unprefixed registry — a prefixed
+    # registry (e.g. v2 rerun) is \input alongside it and must not redefine them.
     canary = m.get("canary", {})
-    lines.append(_macro("canaryOverlap", str(canary.get("overlap", "?"))))
-    lines.append(_macro("canaryClean", "yes" if canary.get("clean") else "NO"))
-    lines.append(_macro("streamHash", canary.get("stream_hash", "")))
-    cfg = m.get("config", {})
-    lines.append(_macro("modelName", cfg.get("model_name", "")))
-    lines.append(_macro("loraRank", str(cfg.get("lora_r", ""))))
-    lines.append(_macro("maxUpdates", str(cfg.get("max_updates", ""))))
+    if not prefix:
+        lines.append(_macro("canaryOverlap", str(canary.get("overlap", "?"))))
+        lines.append(_macro("canaryClean", "yes" if canary.get("clean") else "NO"))
+        lines.append(_macro("streamHash", canary.get("stream_hash", "")))
+        cfg = m.get("config", {})
+        lines.append(_macro("modelName", cfg.get("model_name", "")))
+        lines.append(_macro("loraRank", str(cfg.get("lora_r", ""))))
+        lines.append(_macro("maxUpdates", str(cfg.get("max_updates", ""))))
 
     with open(out_tex, "w") as f:
         f.write("\n".join(lines))
@@ -77,8 +91,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="run dir containing metrics.json")
     ap.add_argument("--out", required=True, help="output .tex file for the paper")
+    ap.add_argument("--prefix", default="", help="macro name prefix (e.g. v2) so multiple run registries can coexist")
     args = ap.parse_args()
-    res = write_results_tex(os.path.join(args.run, "metrics.json"), args.out)
+    res = write_results_tex(os.path.join(args.run, "metrics.json"), args.out, prefix=args.prefix)
     print("results.tex written:", json.dumps(res))
 
 
