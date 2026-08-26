@@ -1044,3 +1044,84 @@ def test_env_no_audit_fields_when_absent_from_metadata():
     assert "sccl_nbhd" not in step_info
     assert "sccl_probe" not in step_info
 
+
+
+# ---------------------------------------------------------------------------
+# 7) SCCL v4: in-update BASE ANCHOR (gold-free capability preservation)
+# ---------------------------------------------------------------------------
+
+def test_sccl_anchor_engaged_for_listed_learner():
+    """A learner in sccl_anchor_learners with sccl_anchor_lambda>0 must pass the
+    anchor strength through to apply_update (in-update pull toward frozen base)."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_anchor", learners=["sccl_anchor"])
+    env.cfg.sccl_anchor_learners = ["sccl_anchor"]
+    env.cfg.sccl_anchor_lambda = 0.4
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("executed") and ui.get("accepted"), ui
+    assert eng.last_update_kw is not None
+    assert abs(eng.last_update_kw["anchor_lambda"] - 0.4) < 1e-9, \
+        f"anchor must be engaged for listed learner, got {eng.last_update_kw['anchor_lambda']}"
+
+
+def test_sccl_anchor_not_engaged_for_unlisted_learner():
+    """Isolation: a learner NOT in sccl_anchor_learners must get anchor_lambda=0,
+    so the anchor can be cleanly A/B'd in the ladder without cross-contamination."""
+    env, eng, ver, vault = _sccl_env(learner="sccl", learners=["sccl"])
+    env.cfg.sccl_anchor_learners = ["sccl_anchor"]   # sccl is NOT listed
+    env.cfg.sccl_anchor_lambda = 0.4
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    assert eng.last_update_kw["anchor_lambda"] == 0.0, \
+        "unlisted learner must not receive the anchor"
+
+
+def test_sccl_anchor_default_off_is_goldfree_and_decision_independent():
+    """With no anchor learners configured the anchor stays 0 (legacy behaviour),
+    and the accept/reject decision is unchanged. The anchor is a parameter-space
+    penalty and never reads gold; here we confirm zeroing/setting it does not flip
+    the gate outcome on a poisoned-gold task (decision stays certification+RRV)."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_anchor", learners=["sccl_anchor"])
+    # default config -> no anchor learners -> anchor_lambda must be 0
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    assert eng.last_update_kw["anchor_lambda"] == 0.0
+    ui = step_info["update_info"]
+    assert ui.get("executed") and ui.get("accepted"), ui
+    # now engage the anchor heavily; the gate outcome must be IDENTICAL (gold-free
+    # anchor cannot change which updates are accepted, only how they move weights)
+    env2, eng2, ver2, vault2 = _sccl_env(learner="sccl_anchor", learners=["sccl_anchor"])
+    env2.cfg.sccl_anchor_learners = ["sccl_anchor"]
+    env2.cfg.sccl_anchor_lambda = 5.0
+    o2, reward2, done2, step_info2 = env2.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui2 = step_info2["update_info"]
+    assert ui2.get("executed") and ui2.get("accepted") == ui.get("accepted"), \
+        "anchor strength must not change the accept/reject decision"
+    assert eng2.last_update_kw["anchor_lambda"] == 5.0
+
+
+def test_sccl_anchor_per_learner_lambda_map():
+    """sccl_anchor_lambdas overrides the scalar per learner so a lambda ablation
+    can run in a single ladder; an unlisted anchor learner falls back to the scalar."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_anchor_hi", learners=["sccl_anchor_hi"])
+    env.cfg.sccl_anchor_learners = ["sccl_anchor_lo", "sccl_anchor_hi"]
+    env.cfg.sccl_anchor_lambda = 0.1                     # fallback scalar
+    env.cfg.sccl_anchor_lambdas = {"sccl_anchor_hi": 0.5}  # override for this learner
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    assert abs(eng.last_update_kw["anchor_lambda"] - 0.5) < 1e-9
+    # fallback: a listed learner with no map entry uses the scalar
+    env2, eng2, ver2, vault2 = _sccl_env(learner="sccl_anchor_lo", learners=["sccl_anchor_lo"])
+    env2.cfg.sccl_anchor_learners = ["sccl_anchor_lo", "sccl_anchor_hi"]
+    env2.cfg.sccl_anchor_lambda = 0.1
+    env2.cfg.sccl_anchor_lambdas = {"sccl_anchor_hi": 0.5}
+    env2.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                     metadata={"sccl": _cert_meta(found=True)}))
+    assert abs(eng2.last_update_kw["anchor_lambda"] - 0.1) < 1e-9

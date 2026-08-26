@@ -258,6 +258,15 @@ class GroundedContinualEnv:
 
         lr = eng.bounded_lr() if self._lr_decay else None
         anch = self._anchor_lambda if (self._anchor_lambda > 0) else 0.0
+        # ---- SCCL v4: per-learner in-update BASE ANCHOR (gold-free). Pulls the
+        # LoRA update toward the frozen base so accepted updates preserve the base
+        # model's UNCERTIFIED general capability, which the RRV gate cannot protect.
+        # Anchor target is LoRA init (= frozen base); no labels anywhere. ----
+        if name in set(getattr(self.cfg, "sccl_anchor_learners", [])):
+            _lamap = getattr(self.cfg, "sccl_anchor_lambdas", {}) or {}
+            _sa = float(_lamap.get(name, getattr(self.cfg, "sccl_anchor_lambda", 0.0)))
+            if _sa > 0:
+                anch = _sa
         rf = self._replay_frac if (self._replay_frac > 0) else 0.0
         rp = self.vault.to_pairs()[:int(max(1, len(self.vault._skills) * rf))] if (rf > 0 and self.vault is not None) else None
         # ---- SCCL v2: CERTIFIED REHEARSAL (gold-free) ------------------------

@@ -89,6 +89,17 @@ class ExperimentConfig:
                                         # self-generated spec variant (paraphrase
                                         # for code; numeric variant for math)
     sccl_nbhd_tests: int = 3            # self-tests written for the code variant
+    # ---- SCCL v4: in-update base anchoring (gold-free capability preservation) ----
+    # The RRV gate protects CERTIFIED vault skills, but the base model's UNCERTIFIED
+    # general capability (e.g. arithmetic holdout) is damaged INSIDE an accepted
+    # update, which no accept/reject gate can prevent. v4 pulls the LoRA update
+    # toward the frozen base (= LoRA init; no labels) to preserve it. Per-learner
+    # so it can be isolated in the ladder; lambda is the quadratic pull strength.
+    sccl_anchor_learners: List[str] = field(default_factory=list)
+    sccl_anchor_lambda: float = 0.0     # >0 => in-update base anchor for listed learners
+    # per-learner override of the anchor strength (for a lambda ablation in one
+    # ladder); falls back to sccl_anchor_lambda when a learner is absent here.
+    sccl_anchor_lambdas: dict = field(default_factory=dict)
     # output
     out_dir: str = "runs/run"
     seed: int = 42
