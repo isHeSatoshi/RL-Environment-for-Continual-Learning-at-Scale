@@ -260,16 +260,39 @@ class GroundedContinualEnv:
         anch = self._anchor_lambda if (self._anchor_lambda > 0) else 0.0
         rf = self._replay_frac if (self._replay_frac > 0) else 0.0
         rp = self.vault.to_pairs()[:int(max(1, len(self.vault._skills) * rf))] if (rf > 0 and self.vault is not None) else None
+        # ---- SCCL v2: CERTIFIED REHEARSAL (gold-free) ------------------------
+        # Mix stride-sampled pairs from the SELF-certified vault into every
+        # update so prior (cross-family) certified skills keep receiving
+        # gradient. The replay buffer itself is certified-correct by
+        # construction — nothing here touches gold.
+        rk = (int(getattr(self.cfg, "sccl_replay_k", 0))
+              if name in set(getattr(self.cfg, "sccl_replay_learners", [])) else 0)
+        if rk > 0 and self.vault is not None:
+            vp = self.vault.to_pairs()
+            if vp:
+                if len(vp) > rk:
+                    idxs = sorted({int(i * len(vp) / rk) for i in range(rk)})
+                    rp = [vp[i] for i in idxs]
+                else:
+                    rp = list(vp)
+                rf = 1.0  # pairs already selected above; pass them through as-is
         m = eng.apply_update(pairs, lr=lr, anchor_lambda=anch, replay_frac=rf,
                              replay_pairs=rp)
 
         if use_sccl:
+            probe_learner = name in set(getattr(self.cfg, "sccl_probe_learners", []))
             veto = self.vault.selfreplay_veto(
                 eng, self.verifier,
                 check_skills=getattr(self.cfg, "sccl_replay_check", 3),
-                n_samples=getattr(self.cfg, "sccl_replay_samples", 2))
+                n_samples=getattr(self.cfg, "sccl_replay_samples", 2),
+                check_probes=int(getattr(self.cfg, "sccl_probe_check", 0)) if probe_learner else 0,
+                check_math=int(getattr(self.cfg, "sccl_rrv_math", 0)) if probe_learner else 0)
             gate.update({"veto": veto["veto"], "veto_reason": veto["reason"],
                          "checked": veto["checked"], "broke": veto["broke"],
+                         "checked_probes": veto.get("checked_probes", 0),
+                         "broke_probes": veto.get("broke_probes", []),
+                         "checked_math": veto.get("checked_math", 0),
+                         "broke_math": veto.get("broke_math", []),
                          "skipped": veto.get("skipped", [])})
             accepted = not veto["veto"]
             # ---- Gold telemetry ONLY (post-hoc gate-agreement analysis). ----

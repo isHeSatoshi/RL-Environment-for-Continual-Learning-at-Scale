@@ -108,7 +108,9 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         ref_set = set(getattr(cfg, "refinject_learners", ["vsr"]))
         sccl_set = (set(getattr(cfg, "sccl_learners", [])) |
                     set(getattr(cfg, "sccl_nogate_learners", [])) |
-                    set(getattr(cfg, "sccl_nocons_learners", [])))
+                    set(getattr(cfg, "sccl_nocons_learners", [])) |
+                    set(getattr(cfg, "sccl_replay_learners", [])) |
+                    set(getattr(cfg, "sccl_probe_learners", [])))
         is_sccl = name in sccl_set
         certifier = None
         if is_sccl:
@@ -155,7 +157,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         updates = rollbacks = 0
         recall_hits = recall_probe_total = 0
         sccl_stats = {"steps": 0, "certified": 0, "rrv_updates": 0, "rrv_vetoes": 0,
-                      "gold_probes": 0, "gold_agree": 0, "cert_conf_sum": 0.0}
+                      "gold_probes": 0, "gold_agree": 0, "cert_conf_sum": 0.0,
+                      "probes_made": 0, "probes_committed": 0}
         t0 = time.time()
         obs = env.reset()
         last_family_seen = 0
@@ -181,6 +184,32 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     sccl_stats["steps"] += 1
                     sccl_stats["certified"] += int(cr.found)
                     sccl_stats["cert_conf_sum"] += float(cr.confidence)
+                    # ---- SCCL v2: manufacture a certified neighborhood probe ----
+                    # Spec-only call: make_probe(spec, domain, CertResult) — the
+                    # probe path never sees a Task object or any gold field.
+                    if cr.found and vault is not None and \
+                            name in set(getattr(cfg, "sccl_probe_learners", [])) and \
+                            int(getattr(cfg, "sccl_probes", 0)) > 0:
+                        try:
+                            probe = certifier.make_probe(engine, verifier, task.prompt,
+                                                         task.domain, cr)
+                        except Exception:
+                            probe = None
+                        if probe is not None:
+                            sccl_stats["probes_made"] += 1
+                            committed = vault.commit_probe(
+                                task_id=task.task_id + ":p", family=task.family,
+                                spec=probe["spec"], prompt=probe["prompt"],
+                                code=probe["code"],
+                                self_tests=probe.get("self_tests") or [],
+                                conf=float(probe.get("confidence", 0.0)),
+                                domain=probe.get("domain", task.domain),
+                                entry=probe.get("entry", ""))
+                            sccl_stats["probes_committed"] += int(bool(committed))
+                            meta_extra["sccl_probe"] = {"made": True,
+                                                        "committed": bool(committed)}
+                        else:
+                            meta_extra["sccl_probe"] = {"made": False}
                 else:
                     # VSR: retrieval-grounded generation (forward transfer). Controls:
                     # unchanged learner prompt. Gold reference is metadata only.

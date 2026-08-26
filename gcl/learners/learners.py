@@ -258,9 +258,31 @@ class SCCLNoConsLearner(SCCLLearner):
     name = "sccl_nocons"
 
 
+class SCCLReplayLearner(SCCLLearner):
+    """SCCL v2 ablation: + certified rehearsal. Each update also trains on
+    stride-sampled pairs from the self-certified vault (env wires this via
+    sccl_replay_learners). Isolates the contribution of certified replay."""
+    name = "sccl_replay"
+
+
+class SCCLProbeLearner(SCCLLearner):
+    """SCCL v2 ablation: + neighborhood probes. Certification manufactures
+    certified spec variants (kind='probe') and the RRV re-checks them (and
+    math entries) so the gate protects generalization, not just trained
+    points. Isolates the contribution of probe-extended RRV."""
+    name = "sccl_probe"
+
+
+class SCCLV2Learner(SCCLLearner):
+    """SCCL v2 — self-manufactured stability: certified rehearsal +
+    neighborhood probes + math-RRV. Still fully gold-free."""
+    name = "sccl_v2"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
                                  SelfDistillLearner, ExecFilterLearner,
-                                 SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner)}
+                                 SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner,
+                                 SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

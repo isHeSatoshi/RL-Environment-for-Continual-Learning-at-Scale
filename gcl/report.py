@@ -51,6 +51,7 @@ def write_results_tex(metrics_path: str, out_tex: str) -> Dict[str, Any]:
             lines.append(_macro(f"{safe}goldagree", _fmt(sc.get("gold_agreement", 0.0))))
             lines.append(_macro(f"{safe}rrvupdates", str(sc.get("rrv_updates", 0))))
             lines.append(_macro(f"{safe}rrvvetoes", str(sc.get("rrv_vetoes", 0))))
+            lines.append(_macro(f"{safe}probes", str(sc.get("probes_committed", 0))))
         vs = d.get("vsr")
         if isinstance(vs, dict):
             lines.append(_macro(f"{safe}vaultsize", str(vs.get("vault_size", 0))))

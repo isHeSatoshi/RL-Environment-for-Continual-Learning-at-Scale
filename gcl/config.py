@@ -72,6 +72,13 @@ class ExperimentConfig:
     sccl_replay_check: int = 3          # certified skills re-checked per gated update
     sccl_replay_samples: int = 2        # regeneration attempts per skill in RRV veto
     sccl_gate_probe: int = 4            # gold-agreement telemetry probe size (eval only)
+    # ---- SCCL v2: self-manufactured stability (still fully gold-free) ----
+    sccl_replay_learners: List[str] = field(default_factory=list)  # certified-rehearsal learners
+    sccl_replay_k: int = 0              # certified vault pairs stride-mixed into each update
+    sccl_probe_learners: List[str] = field(default_factory=list)   # neighborhood-probe learners
+    sccl_probes: int = 1                # probes generated per certified task
+    sccl_probe_check: int = 0           # probes re-checked per RRV veto
+    sccl_rrv_math: int = 0              # math vault entries re-checked per RRV veto
     # output
     out_dir: str = "runs/run"
     seed: int = 42

@@ -79,16 +79,20 @@ def _make_embedder(dim: int = 384):
 # ----------------------------- store ----------------------------------------
 class _Skill:
     __slots__ = ("task_id", "family", "prompt", "code", "test_code", "pass_rate",
-                 "reward", "emb", "ts", "domain", "spec")
+                 "reward", "emb", "ts", "domain", "spec", "kind")
 
     def __init__(self, task_id, family, prompt, code, test_code, pass_rate, reward,
-                 emb, ts, domain: str = "code", spec: str = ""):
+                 emb, ts, domain: str = "code", spec: str = "", kind: str = "skill"):
         self.task_id = task_id; self.family = family; self.prompt = prompt
         self.code = code; self.test_code = test_code; self.pass_rate = pass_rate
         self.reward = reward; self.emb = emb; self.ts = ts
         # `prompt` is the REGENERATION prompt (what the model is trained on);
         # `spec` is the raw task specification used for retrieval embeddings.
         self.domain = domain; self.spec = spec or prompt
+        # `kind`: "skill" = a certified task the model TRAINED on;
+        #         "probe" = a certified neighborhood variant it never trained on
+        #         (SCCL v2: RRV probes test generalization, not memorization).
+        self.kind = kind
 
 
 class SkillVault:
@@ -322,7 +326,8 @@ class SkillVault:
                                            r.get("code", ""), r.get("test_code", ""),
                                            float(r.get("pass_rate", 0.0)), float(r.get("reward", 0.0)),
                                            emb, float(r.get("ts", 0.0)),
-                                           domain=r.get("domain", "code"), spec=r.get("spec", r.get("prompt", ""))))
+                                           domain=r.get("domain", "code"), spec=r.get("spec", r.get("prompt", "")),
+                                           kind=r.get("kind", "skill")))
                 self._embs.append(self._skills[-1].emb)
         except Exception:
             pass
@@ -332,7 +337,8 @@ def _safe_skill_dict(s: _Skill) -> Dict[str, Any]:
     return {"task_id": s.task_id, "family": s.family, "prompt": s.prompt,
             "code": s.code, "test_code": s.test_code, "pass_rate": s.pass_rate,
             "reward": s.reward, "ts": s.ts,
-            "domain": getattr(s, "domain", "code"), "spec": getattr(s, "spec", s.prompt)}
+            "domain": getattr(s, "domain", "code"), "spec": getattr(s, "spec", s.prompt),
+            "kind": getattr(s, "kind", "skill")}
 
 
 def _entry_point(code_or_test: str) -> str:
@@ -366,7 +372,7 @@ class SelfCertVault(SkillVault):
     def commit_certified(self, task_id: str, family: str, spec: str, prompt: str,
                          code: str, self_tests: List[str], conf: float,
                          domain: str = "code", entry: str = "",
-                         dedup_sim: float = 0.0) -> bool:
+                         dedup_sim: float = 0.0, kind: str = "skill") -> bool:
         """Admit a self-certified skill (spec-only provenance, no gold)."""
         code = (code or "").strip()
         if not code:
@@ -379,10 +385,26 @@ class SelfCertVault(SkillVault):
         s = _Skill(task_id=task_id, family=family, prompt=prompt, code=code,
                    test_code="\n".join(self_tests or []), pass_rate=float(conf),
                    reward=float(conf), emb=self._embed(spec + "\n" + code),
-                   ts=time.time(), domain=domain, spec=spec)
+                   ts=time.time(), domain=domain, spec=spec, kind=kind)
         self._skills.append(s); self._embs.append(s.emb)
         self._save()
         return True
+
+    def commit_probe(self, task_id: str, family: str, spec: str, prompt: str,
+                     code: str, self_tests: List[str], conf: float,
+                     domain: str = "code", entry: str = "") -> bool:
+        """Admit a certified NEIGHBORHOOD probe (kind="probe", SCCL v2).
+
+        Probes are certified variants the model never trains on; RRV re-checks
+        them so the safety gate protects generalization, not just memorized
+        training points. Dedup is skipped by construction: a probe is a
+        paraphrase of an existing skill, so spec-similarity dedup would reject
+        every probe.
+        """
+        return self.commit_certified(task_id=task_id, family=family, spec=spec,
+                                     prompt=prompt, code=code, self_tests=self_tests,
+                                     conf=conf, domain=domain, entry=entry,
+                                     dedup_sim=0.0, kind="probe")
 
     def to_pairs(self) -> List[Dict[str, str]]:
         """Replay pairs keyed on the stored regeneration prompt (code + math)."""
@@ -411,7 +433,8 @@ class SelfCertVault(SkillVault):
 
     def selfreplay_veto(self, engine: Any, verifier: Any, *,
                         check_skills: int = 3, n_samples: int = 2,
-                        sample_temp: float = 0.7) -> Dict[str, Any]:
+                        sample_temp: float = 0.7, check_probes: int = 0,
+                        check_math: int = 0) -> Dict[str, Any]:
         """Self-Replay Veto (RRV) — the gold-free forgetting detector.
 
         For each recently committed self-certified skill, REGENERATE solutions
@@ -420,6 +443,16 @@ class SelfCertVault(SkillVault):
         regeneration passes all its self-tests. If any skill regresses, the
         candidate weight update is vetoed (rolled back by the caller).
 
+        SCCL v2 extends the veto beyond trained points:
+          * check_probes>0 — also re-check the newest certified NEIGHBORHOOD
+            probes (kind="probe", paraphrased specs the model never trained
+            on). Probe regression = loss of generalization, the failure mode
+            that trained-skill replay alone cannot see.
+          * check_math>0 — also re-check math vault entries: regenerate
+            answers and require at least one to equal the stored certified
+            value (canonical-form comparison). In v1 math entries were never
+            protected at all.
+
         Note we deliberately do NOT fall back to executing the stored code: that
         artifact trivially passes its own tests regardless of the model's state,
         so it would never veto and would make the gate vacuous. RRV must measure
@@ -427,12 +460,28 @@ class SelfCertVault(SkillVault):
         catastrophic forgetting, measured without any gold.
         """
         from .engine import extract_code
+        from .selfcert import extract_number, format_number
 
         broke: List[str] = []
+        broke_probes: List[str] = []
+        broke_math: List[str] = []
         skipped: List[str] = []
-        checked = 0
+        checked = checked_probes = checked_math = 0
 
-        pool = list(self._skills)[-check_skills:] if check_skills > 0 else []
+        skills = [s for s in self._skills if getattr(s, "kind", "skill") == "skill"]
+        probes = [s for s in self._skills if getattr(s, "kind", "skill") == "probe"]
+
+        def _regen_codes(prompt: str) -> List[str]:
+            try:
+                regen = engine.sample_candidates(prompt, n=max(1, n_samples),
+                                                 temperature=sample_temp)
+                return [c for c in (extract_code(r) for r in regen)
+                        if (c or "").strip()]
+            except Exception:
+                return []
+
+        # 1) certified code skills the model TRAINED on (v1 behaviour)
+        pool = skills[-check_skills:] if check_skills > 0 else []
         for s in reversed(pool):
             if getattr(s, "domain", "code") != "code" or not (s.test_code or "").strip():
                 skipped.append(s.task_id)
@@ -443,17 +492,49 @@ class SelfCertVault(SkillVault):
                 skipped.append(s.task_id)
                 continue
             checked += 1
-            try:
-                regen = engine.sample_candidates(s.prompt, n=max(1, n_samples),
-                                                 temperature=sample_temp)
-                codes = [extract_code(r) for r in regen]
-                codes = [c for c in codes if (c or "").strip()]
-            except Exception:
-                codes = []
-            if not self._any_passes(codes, tests, verifier):
+            if not self._any_passes(_regen_codes(s.prompt), tests, verifier):
                 broke.append(s.task_id)
 
-        return {"veto": bool(broke),
-                "reason": ("rrv_regress:" + ",".join(broke)) if broke else "ok",
-                "checked": checked, "broke": broke, "skipped": skipped,
-                "n_skills": len(self._skills)}
+        # 2) neighborhood probes (code): same protocol on UNTRAINED variants
+        ppool = probes[-check_probes:] if check_probes > 0 else []
+        for s in reversed(ppool):
+            if getattr(s, "domain", "code") != "code" or not (s.test_code or "").strip():
+                skipped.append(s.task_id)
+                continue
+            tests = [l.strip() for l in s.test_code.splitlines()
+                     if l.strip().startswith("assert")]
+            if not tests:
+                skipped.append(s.task_id)
+                continue
+            checked_probes += 1
+            if not self._any_passes(_regen_codes(s.prompt), tests, verifier):
+                broke_probes.append(s.task_id)
+
+        # 3) math entries (skill or probe): answer must still match certified value
+        if check_math > 0:
+            mpool = [s for s in self._skills
+                     if getattr(s, "domain", "code") == "math" and (s.code or "").strip()]
+            for s in reversed(mpool[-check_math:]):
+                want = format_number(str(s.code))
+                checked_math += 1
+                try:
+                    regen = engine.sample_candidates(s.prompt, n=max(1, n_samples),
+                                                     temperature=sample_temp)
+                except Exception:
+                    regen = []
+                ok = False
+                for r in regen:
+                    a = extract_number(r or "")
+                    if a is not None and format_number(a) == want:
+                        ok = True
+                        break
+                if not ok:
+                    broke_math.append(s.task_id)
+
+        all_broke = broke + broke_probes + broke_math
+        return {"veto": bool(all_broke),
+                "reason": ("rrv_regress:" + ",".join(all_broke)) if all_broke else "ok",
+                "checked": checked, "broke": broke,
+                "checked_probes": checked_probes, "broke_probes": broke_probes,
+                "checked_math": checked_math, "broke_math": broke_math,
+                "skipped": skipped, "n_skills": len(self._skills)}

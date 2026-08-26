@@ -48,7 +48,7 @@ def test_certifier_api_is_spec_only():
     import inspect
     for fn in (SelfCertifier.certify, SelfCertifier.certify_code,
                SelfCertifier.certify_math, SelfCertifier.propose_entry,
-               SelfCertifier.generate_test_bags):
+               SelfCertifier.generate_test_bags, SelfCertifier.make_probe):
         params = list(inspect.signature(fn).parameters)
         assert "task" not in params, f"{fn.__name__} accepts a task -> gold leak risk"
 
@@ -371,6 +371,7 @@ class FakeEngine:
         self.updates_done = 0
         self.regen_passes = regen_passes
         self.update_calls = 0
+        self.last_update_kw = None
 
     def _snapshot(self):
         return {"n": self.updates_done, "replay": list(self._replay)}
@@ -381,6 +382,7 @@ class FakeEngine:
 
     def apply_update(self, pairs, **kw):
         self.update_calls += 1
+        self.last_update_kw = dict(kw)
         self._replay.extend(pairs)
         self.updates_done += 1
         return {"loss_start": 1.0, "loss_end": 0.2, "grad_norm": 0.5,
@@ -524,3 +526,262 @@ def test_sccl_math_target_format():
     assert reward == 0.0, "poisoned gold reference -> telemetry reward 0"
     assert ui.get("executed") and ui.get("accepted"), ui
     assert ui["target_source"] == "self_certified"
+
+
+# ---------------------------------------------------------------------------
+# 6) SCCL v2 — self-manufactured stability (rehearsal + neighborhood probes)
+# ---------------------------------------------------------------------------
+
+class _ProbeEngine(StubEngine):
+    """Scripted engine for make_probe tests: emits a paraphrase / math variant,
+    then swaps candidate quality for the PROBE certification pass."""
+
+    def __init__(self, paraphrase="Compute the total of the two integer arguments a and b and return it.",
+                 probe_pool=None, greedy_for_probe=None,
+                 math_variant="What is 7 times 8? Give only the final number."):
+        super().__init__()
+        self.paraphrase = paraphrase
+        self.probe_pool = probe_pool
+        self.greedy_for_probe = greedy_for_probe
+        self.math_variant = math_variant
+        self._in_probe = False
+
+    def generate(self, prompt, adapter_on=True, greedy=False):
+        if "Rewrite the following programming task specification" in prompt:
+            self._in_probe = True
+            if self.probe_pool is not None:
+                self.candidates = list(self.probe_pool)
+            if self.greedy_for_probe is not None:
+                self.greedy_solution = self.greedy_for_probe
+            return self.paraphrase
+        if "Write ONE similar word problem" in prompt:
+            return self.math_variant
+        return super().generate(prompt, adapter_on=adapter_on, greedy=greedy)
+
+
+def _base_cert(self_tests=None):
+    return CertResult(found=True, code=_CERT_CODE, confidence=0.9, domain="code",
+                      entry="add2", self_tests=list(self_tests or _CERT_TESTS),
+                      prompt="You are an expert Python programmer.\nReturn the sum.\n```python\n")
+
+
+def test_make_probe_code_bidirectional_accept():
+    """Paraphrase re-certifies and BOTH directions of cross-validation pass:
+    the probe is admitted with the probe winner's code + tests."""
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng, ver = _ProbeEngine(), Verifier(sandbox=PythonSandbox())
+    base = _base_cert(self_tests=["assert add2(1, 2) == 3", "assert add2(0, 0) == 0"])
+    probe = sc.make_probe(eng, ver, "Return the sum of two integers a and b.",
+                          "code", base)
+    assert probe is not None, "bidirectional cross-validation should admit the probe"
+    assert probe["kind"] == "probe" and probe["domain"] == "code"
+    assert probe["entry"] == "add2"
+    assert "named `add2`" in probe["spec"], "interface hint must ride along the paraphrase"
+    assert probe["spec"] != "Return the sum of two integers a and b."
+    assert probe["self_tests"], "probe must carry its own certifying suite"
+    assert probe["confidence"] >= 0.65
+    # probe winner must actually pass the probe suite (executed, not assumed)
+    _, info, _ = ver.reward(domain="code", code=probe["code"],
+                            test_code="\n".join(probe["self_tests"]))
+    assert info["pass_rate"] >= 1.0
+
+
+def test_make_probe_code_rejected_when_cross_validation_fails():
+    """Probe winner passes its OWN suite but fails the BASE suite: the
+    paraphrase is not semantically equivalent -> probe rejected (None)."""
+    # probe pool: "return 0" passes some add2 self-tests, "return 99" none.
+    # The winner ("return 0") fails the base suite -> second direction fails.
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng = _ProbeEngine(probe_pool=["```python\ndef add2(a, b):\n    return 0\n```"],
+                       greedy_for_probe="```python\ndef add2(a, b):\n    return 99\n```")
+    ver = Verifier(sandbox=PythonSandbox())
+    base = _base_cert(self_tests=["assert add2(9, 9) == 18"])
+    probe = sc.make_probe(eng, ver, "Return the sum of two integers a and b.",
+                          "code", base)
+    assert probe is None, "cross-validation failure must reject the probe"
+
+
+def test_make_probe_code_rejected_when_paraphrase_uncertifiable():
+    """If the paraphrase itself cannot be certified, no probe exists."""
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng = _ProbeEngine(probe_pool=["```python\ndef add2(a, b):\n    return 99\n```"],
+                       greedy_for_probe="```python\ndef add2(a, b):\n    return 7\n```")
+    ver = Verifier(sandbox=PythonSandbox())
+    probe = sc.make_probe(eng, ver, "Return the sum of two integers a and b.",
+                          "code", _base_cert())
+    assert probe is None
+
+
+def test_make_probe_math_variant_certified_by_majority():
+    sc = SelfCertifier(k=6, tau_math=0.6)
+    eng = _ProbeEngine()
+    probe = sc.make_probe(eng, Verifier(sandbox=PythonSandbox()),
+                          "What is 6 times 7?", "math",
+                          CertResult(found=True, code="42", domain="math"))
+    assert probe is not None
+    assert probe["kind"] == "probe" and probe["domain"] == "math"
+    assert probe["code"] == "42"          # majority-vote certified answer
+    assert "7 times 8" in probe["spec"]
+    assert probe["self_tests"] == []
+
+
+def test_make_probe_math_rejects_uncertified_variant():
+    sc = SelfCertifier(k=6, tau_math=0.99)   # impossible threshold
+    eng = _ProbeEngine()
+    probe = sc.make_probe(eng, Verifier(sandbox=PythonSandbox()),
+                          "What is 6 times 7?", "math",
+                          CertResult(found=True, code="42", domain="math"))
+    assert probe is None
+
+
+def test_commit_probe_stores_kind_and_persists(tmp_path):
+    v = SelfCertVault(directory=str(tmp_path / "vault"))
+    ok = v.commit_probe(task_id="t1:p", family="f", spec="Paraphrase of sum.",
+                        prompt="PROMPT\n```python\n", code=_CERT_CODE,
+                        self_tests=_CERT_TESTS, conf=0.9)
+    assert ok and len(v) == 1
+    assert v._skills[-1].kind == "probe"
+    # probes ride along in replay pairs too (certified pairs are certified pairs)
+    pairs = v.to_pairs()
+    assert pairs and pairs[0]["target"] == _CERT_CODE
+    # kind survives a save/load round-trip
+    v2 = SelfCertVault(directory=str(tmp_path / "vault"))
+    assert len(v2) == 1 and v2._skills[-1].kind == "probe"
+
+
+def test_commit_certified_defaults_to_skill_kind():
+    v = SelfCertVault()
+    v.commit_certified("t1", "f", "s", "p", _CERT_CODE, _CERT_TESTS, 0.9)
+    assert v._skills[-1].kind == "skill"
+
+
+def test_rrv_check_skills_ignores_probes():
+    """v1 compatibility: check_skills must only touch kind='skill' entries, so
+    a probe-only vault never vetoes under the legacy call shape."""
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_probe("t1:p", "f", "Paraphrase.", "PROMPT\n```python\n",
+                   _CERT_CODE, _CERT_TESTS, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a - b\n```"  # broken
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2)
+    assert not res["veto"] and res["checked"] == 0
+
+
+def test_rrv_probe_check_fires_on_untrained_regression():
+    """The v2 gate protects a GENERALIZATION neighborhood: a probe the model
+    never trained on must veto the update when it can no longer be regenerated."""
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_certified("t1", "f", "Return the sum.", "PROMPT s\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    v.commit_probe("t1:p", "f", "Paraphrase.", "PROMPT p\n```python\n",
+                   _CERT_CODE, _CERT_TESTS, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a + b\n```"
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2, check_probes=2)
+    assert not res["veto"] and res["checked_probes"] == 1
+    # now the adapter loses the skill: both the skill AND the probe regress
+    eng.regen_code = "```python\ndef add2(a, b):\n    return 0\n```"
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2, check_probes=2)
+    assert res["veto"]
+    assert "t1" in res["broke"] and "t1:p" in res["broke_probes"]
+    assert res["reason"].startswith("rrv_regress:")
+
+
+def test_rrv_probe_check_off_by_default():
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_probe("t1:p", "f", "Paraphrase.", "PROMPT p\n```python\n",
+                   _CERT_CODE, _CERT_TESTS, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return 0\n```"  # broken
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2)
+    assert not res["veto"] and res["checked_probes"] == 0
+
+
+def test_rrv_math_check():
+    """math entries were UNPROTECTED in v1; v2 re-generates answers and vetoes
+    when the certified value can no longer be reproduced."""
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    eng = StubEngine()
+    math_prompt = "Solve and give ONLY the final numeric answer.\nWhat is 6 times 7?\nAnswer: "
+    v.commit_certified("m1", "fam", "What is 6 times 7?", math_prompt, "42",
+                       [], 0.86, domain="math")
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=3, check_math=1)
+    assert not res["veto"] and res["checked_math"] == 1
+    eng.math_answers = ["41", "41", "41"]   # the answer drifted
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=3, check_math=1)
+    assert res["veto"] and "m1" in res["broke_math"]
+    # canonical-form match: 42.0 still counts as 42
+    eng.math_answers = ["The answer is 42.0", "41", "41"]
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=3, check_math=1)
+    assert not res["veto"]
+
+
+def test_sccl_certified_rehearsal_mixes_vault_pairs():
+    """Certified rehearsal: a replay learner's update must train on stride-sampled
+    certified vault pairs in addition to the new certified target."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_replay", learners=["sccl_replay"])
+    env.cfg.sccl_replay_learners = ["sccl_replay"]
+    env.cfg.sccl_replay_k = 2
+    for i in range(3):
+        vault.commit_certified(f"t{i}", "fam", f"Spec {i}.",
+                               f"PROMPT {i}\n```python\n", _CERT_CODE,
+                               _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("executed") and ui.get("accepted"), ui
+    kw = eng.last_update_kw
+    assert kw is not None and kw.get("replay_pairs") is not None
+    assert len(kw["replay_pairs"]) == 2, "stride sample of 2 from 3 vault pairs"
+    assert kw["replay_frac"] == 1.0
+    assert all("target" in p and "prompt" in p for p in kw["replay_pairs"])
+
+
+def test_sccl_v1_learner_gets_no_rehearsal():
+    env, eng, ver, vault = _sccl_env()
+    env.cfg.sccl_replay_learners = ["sccl_replay"]   # 'sccl' is NOT listed
+    env.cfg.sccl_replay_k = 2
+    vault.commit_certified("t0", "fam", "Spec.", "PROMPT\n```python\n",
+                           _CERT_CODE, _CERT_TESTS, 0.9)
+    env.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                    metadata={"sccl": _cert_meta(found=True)}))
+    kw = eng.last_update_kw
+    assert kw.get("replay_pairs") is None and kw.get("replay_frac") == 0.0
+
+
+def test_sccl_probe_learner_rrv_vetoes_on_probe_regression():
+    """A probe learner's gate re-checks probes; a non-probe learner's gate
+    ignores the exact same probe-only vault."""
+    env, eng, ver, vault = _sccl_env(regen_passes=False, learner="sccl_probe",
+                                     learners=["sccl_probe"])
+    env.cfg.sccl_probe_learners = ["sccl_probe"]
+    env.cfg.sccl_probe_check = 2
+    env.cfg.sccl_rrv_math = 0
+    # probe-ONLY vault: v1 skill check has nothing to look at
+    vault.commit_probe("t0:p", "fam", "Paraphrase.", "PROMPT p\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("executed") and not ui.get("accepted"), ui
+    assert ui["gate"]["broke_probes"] == ["t0:p"]
+    assert env.rollback_count == 1
+
+    # same vault, v1 learner: probes are invisible to its gate
+    env2, eng2, ver2, vault2 = _sccl_env(regen_passes=False)
+    env2.cfg.sccl_probe_learners = ["sccl_probe"]
+    env2.cfg.sccl_probe_check = 2
+    vault2.commit_probe("t0:p", "fam", "Paraphrase.", "PROMPT p\n```python\n",
+                        _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env2.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("accepted"), "v1 learner's gate must not consult probes"
+    assert ui["gate"]["checked_probes"] == 0
+
+
+def test_learner_registry_has_v2_names():
+    from gcl.learners.learners import LEARNERS, SCCLLearner
+    for n in ("sccl_replay", "sccl_probe", "sccl_v2"):
+        assert n in LEARNERS, f"{n} missing from LEARNERS registry"
+        assert issubclass(LEARNERS[n], SCCLLearner)

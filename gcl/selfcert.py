@@ -68,6 +68,20 @@ _SOLUTION_PROMPT_MATH = (
     "Solve and give ONLY the final numeric answer.\n{spec}\nAnswer: "
 )
 
+# ---- SCCL v2: neighborhood-probe generation (spec only — no gold fields) ----
+_PARAPHRASE_PROMPT = (
+    "Rewrite the following programming task specification in different words. "
+    "Preserve EVERY requirement: the same inputs, the same outputs, the same "
+    "constraints and edge cases. Change only the wording, not the meaning. "
+    "Do not solve the task. Output ONLY the rewritten specification.\n{spec}\n"
+)
+
+_MATH_VARIANT_PROMPT = (
+    "Here is a math word problem:\n{spec}\n\n"
+    "Write ONE similar word problem of the same type using DIFFERENT numbers. "
+    "Keep it solvable with the same method. Output ONLY the new problem text.\n"
+)
+
 
 def sccl_prompt(spec: str, entry: str, domain: str = "code") -> str:
     """Solution prompt built ONLY from spec + self-derived entry name."""
@@ -416,3 +430,70 @@ class SelfCertifier:
         if domain == "math":
             return self.certify_math(engine, spec)
         return self.certify_code(engine, verifier, spec, entry=entry)
+
+    # ---- neighborhood probes (SCCL v2, spec only) -----------------------------
+    @staticmethod
+    def _passes_tests(verifier, code: str, tests: List[str]) -> bool:
+        if not (code or "").strip() or not tests:
+            return False
+        try:
+            _, info, _ = verifier.reward(domain="code", code=code,
+                                         test_code="\n".join(tests))
+            return (float(info.get("pass_rate", 0.0)) >= 1.0
+                    and bool(info.get("success", False)))
+        except Exception:
+            return False
+
+    def make_probe(self, engine, verifier, spec: str, domain: str,
+                   base: CertResult) -> Optional[Dict[str, Any]]:
+        """Manufacture a certified NEIGHBORHOOD probe for a certified skill.
+
+        Gold-free by construction: inputs are (spec, domain, base CertResult) —
+        no task object, no gold field. The probe gives the Self-Replay Veto a
+        notion of GENERALIZATION: instead of only asking "can the model still
+        re-express the exact skill it trained on?", RRV also asks "can it still
+        solve a nearby task it never trained on?".
+
+        code : paraphrase the spec, re-certify the paraphrase, and keep the
+               probe only under BIDIRECTIONAL cross-validation — the base
+               winner passes the probe's self-tests AND the probe winner
+               passes the base's self-tests. Agreement in both directions is
+               the strongest spec-only evidence that the paraphrase preserved
+               semantics.
+        math : sample a numeric variant of the problem (different numbers,
+               same method) and certify its answer by majority vote.
+        Returns a probe dict (spec/prompt/code/self_tests/...) or None.
+        """
+        if domain == "math":
+            variant = engine.generate(_MATH_VARIANT_PROMPT.format(spec=spec),
+                                      adapter_on=True, greedy=False)
+            variant = (variant or "").strip()
+            if len(variant) < 20:
+                return None
+            cr = self.certify_math(engine, variant)
+            if not cr.found:
+                return None
+            return {"kind": "probe", "domain": "math", "spec": variant,
+                    "prompt": cr.prompt, "code": cr.code, "self_tests": [],
+                    "entry": "", "confidence": cr.confidence}
+
+        para = engine.generate(_PARAPHRASE_PROMPT.format(spec=spec),
+                               adapter_on=True, greedy=False)
+        para = (para or "").strip()
+        if len(para) < 20 or " ".join(para.split()) == " ".join((spec or "").split()):
+            return None
+        entry = base.entry or ""
+        if entry and f"named `{entry}`" not in para:
+            para = para + f" The function must be named `{entry}`."
+        cr = self.certify_code(engine, verifier, para, entry=entry)
+        if not cr.found or not cr.self_tests or not base.self_tests:
+            return None
+        # bidirectional cross-validation (spec-only evidence of same semantics)
+        if not self._passes_tests(verifier, base.code, cr.self_tests):
+            return None
+        if not self._passes_tests(verifier, cr.code, base.self_tests):
+            return None
+        return {"kind": "probe", "domain": "code", "spec": para,
+                "prompt": cr.prompt, "code": cr.code,
+                "self_tests": list(cr.self_tests), "entry": entry,
+                "confidence": cr.confidence}
