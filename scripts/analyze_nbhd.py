@@ -40,7 +40,12 @@ def _rows(run_dir: str, learner: str):
 def _gold_ok(row: dict) -> float | None:
     v = row.get("verifier") or {}
     pr = v.get("pass_rate")
-    return float(pr) if pr is not None else None
+    if pr is not None:
+        return float(pr)
+    # math rows carry reference-answer telemetry instead of a pass rate
+    if "match" in v:
+        return 1.0 if v.get("match") else 0.0
+    return None
 
 
 def _trained(row: dict) -> bool:

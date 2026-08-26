@@ -52,6 +52,22 @@
   \newcommand{\vtwovsrnogoldacc}{--}\newcommand{\vtwovsrnogoldbwt}{--}\newcommand{\vtwovsrnogoldforget}{--}\newcommand{\vtwovsrnogoldfrontier}{--}%
   \newcommand{\vtwovsrnogoldupdates}{--}\newcommand{\vtwovsrnogoldrollbacks}{--}}
 
+% v3 ladder registry — same stream, seeded (gcl.report --prefix vthree)
+\IfFileExists{results_v3.tex}{\input{results_v3.tex}}{%
+  \newcommand{\vthreefrozenacc}{--}\newcommand{\vthreefrozenbwt}{--}\newcommand{\vthreefrozenforget}{--}%
+  \newcommand{\vthreefrozenfrontier}{--}\newcommand{\vthreefrozenupdates}{--}\newcommand{\vthreefrozenrollbacks}{--}%
+  \newcommand{\vthreescclacc}{--}\newcommand{\vthreescclbwt}{--}\newcommand{\vthreescclforget}{--}\newcommand{\vthreescclfrontier}{--}%
+  \newcommand{\vthreescclupdates}{--}\newcommand{\vthreescclrollbacks}{--}\newcommand{\vthreescclrrvvetoes}{--}%
+  \newcommand{\vthreescclcertrate}{--}\newcommand{\vthreescclmeanconf}{--}%
+  \newcommand{\vthreescclnacc}{--}\newcommand{\vthreescclnbwt}{--}\newcommand{\vthreescclnforget}{--}\newcommand{\vthreescclnfrontier}{--}%
+  \newcommand{\vthreescclnupdates}{--}\newcommand{\vthreescclnrollbacks}{--}\newcommand{\vthreescclnrrvvetoes}{--}%
+  \newcommand{\vthreescclncertrate}{--}\newcommand{\vthreescclnmeanconf}{--}%
+  \newcommand{\vthreescclnnbhdchecked}{--}\newcommand{\vthreescclnnbhdrejected}{--}%
+  \newcommand{\vthreescclpromoteacc}{--}\newcommand{\vthreescclpromotebwt}{--}\newcommand{\vthreescclpromoteforget}{--}\newcommand{\vthreescclpromotefrontier}{--}%
+  \newcommand{\vthreescclpromoteupdates}{--}\newcommand{\vthreescclpromoterollbacks}{--}\newcommand{\vthreescclpromoterrvvetoes}{--}\newcommand{\vthreescclpromoteprobes}{--}%
+  \newcommand{\vthreevsrnogoldacc}{--}\newcommand{\vthreevsrnogoldbwt}{--}\newcommand{\vthreevsrnogoldforget}{--}\newcommand{\vthreevsrnogoldfrontier}{--}%
+  \newcommand{\vthreevsrnogoldupdates}{--}\newcommand{\vthreevsrnogoldrollbacks}{--}}
+
 \title{Self-Certified Continual Learning:\\Gold-Free, Safe Weight Updates for Deployed Code LLMs}
 
 \author{\IEEEauthorblockN{OpenContinualEnv Research}
