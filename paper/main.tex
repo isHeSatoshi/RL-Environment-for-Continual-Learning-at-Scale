@@ -232,6 +232,27 @@ VSR-nogold (gold tests) & \vtwovsrnogoldacc & \vtwovsrnogoldbwt & \vtwovsrnogold
 \end{tabular}
 \end{table}
 
+\begin{table}[htbp]
+\centering
+\caption{SCCL v3 — neighborhood certification at \emph{admission} (same stream hash; seeded, \texttt{torch\_seed}=42; compare within this run). \textsc{sccl\_n} = v1 + only the admission filter (isolates the mechanism); NbhdRej = certified targets rejected by the neighborhood check before any gradient; \textsc{sccl\_promote} = v2 monitoring + probe-curriculum reference.}
+\label{tab:v3}
+\begin{tabular}{lccccccc}
+\toprule
+Learner & ACC$\uparrow$ & BWT$\uparrow$ & Forget$\downarrow$ & Frontier$\uparrow$ & Upd/Rbk & NbhdRej & Vetoes \\
+\midrule
+Frozen              & \vthreefrozenacc & \vthreefrozenbwt & \vthreefrozenforget & \vthreefrozenfrontier & \vthreefrozenupdates/\vthreefrozenrollbacks & -- & -- \\
+SCCL (v1 ref)       & \vthreescclacc & \vthreescclbwt & \vthreescclforget & \vthreescclfrontier & \vthreescclupdates/\vthreescclrollbacks & -- & \vthreescclrrvvetoes \\
+\textbf{SCCL + nbhd admission} & \textbf{\vthreescclnacc} & \textbf{\vthreescclnbwt} & \textbf{\vthreescclnforget} & \textbf{\vthreescclnfrontier} & \vthreescclnupdates/\vthreescclnrollbacks & \vthreescclnnbhdrejected & \vthreescclnrrvvetoes \\
+SCCL promote (v2 ref) & \vthreescclpromoteacc & \vthreescclpromotebwt & \vthreescclpromoteforget & \vthreescclpromotefrontier & \vthreescclpromoteupdates/\vthreescclpromoterollbacks & -- & \vthreescclpromoterrvvetoes \\
+VSR-nogold (gold tests) & \vthreevsrnogoldacc & \vthreevsrnogoldbwt & \vthreevsrnogoldforget & \vthreevsrnogoldfrontier & \vthreevsrnogoldupdates/\vthreevsrnogoldrollbacks & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% NOTE(v3): results narrative for Table~\ref{tab:v3} is filled in after the
+% seeded v3 ladder completes — see scripts/analyze_nbhd.py for the gold-only
+% admission audit (over-filter rate / correct-skepticism / admitted-gold-wrong).
+
 \textbf{Unverified self-training collapses.} \textsc{selfdistill} (train on own outputs) and \textsc{execfilter} (train on executions without certification) both degrade below frozen with $\approx 0.24$ forgetting: without a target-quality signal, gradient steps accumulate the model's own errors. This is the failure mode SCCL exists to fix.
 
 \textbf{Certification recovers learning.} SCCL certifies \scclcertrate\ of tasks (mean confidence \scclmeanconf) and reaches \scclacc\ accuracy --- matching \textsc{vsr\_nogold}, which verifies its self-taught targets with \emph{gold} unit tests and gates on a gold holdout --- while consuming no gold anywhere. Removing consensus (\textsc{sccl-nocons}) costs accuracy (down to \scclnoconsacc) and certification rate; the gold-free RRV veto fired \scclrrvvetoes\ times, each a harmful update rolled back without any gold signal. An end-to-end rerun of the identical configuration (Table~\ref{tab:v2}) reproduces the direction and reaches \vtwoscclacc\ accuracy --- the two values bracket the run-to-run variance discussed below.
