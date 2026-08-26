@@ -1,0 +1,526 @@
+"""SCCL (Self-Certified Continual Learning) mechanics tests — torch-free.
+
+Validates the gold-free contract on the CPU interpreter using stub engines and
+the REAL sandbox verifier. Two layers of proof:
+
+  1. STATIC: gcl/selfcert.py must never touch gold fields (no attribute access
+     to test_code / reference_answer / entry_point / test_list on any object).
+  2. DYNAMIC: with POISONED gold (gold tests assert wrong behaviour), the SCCL
+     env path must follow self-certification metadata — training when certified,
+     refusing when not, and vetoing via Self-Replay regardless of gold reward.
+"""
+import ast
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from gcl.selfcert import (SelfCertifier, CertResult, parse_asserts, parse_entry_name,
+                          extract_number, format_number, sccl_prompt)
+from gcl.vault import SelfCertVault
+from gcl.verify import Verifier
+from gcl.sandbox import PythonSandbox
+from gcl.config import ExperimentConfig
+from gcl.curriculum import Task
+from gcl.env import GroundedContinualEnv, Action, LearnOp
+
+GOLD_FIELDS = {"test_code", "reference_answer", "entry_point", "test_list", "reference"}
+
+
+# ---------------------------------------------------------------------------
+# 1) STATIC gold-free guarantee
+# ---------------------------------------------------------------------------
+
+def test_selfcert_module_never_touches_gold_fields():
+    """selfcert.py must not read gold fields off any object (structural proof)."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "gcl", "selfcert.py")
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in GOLD_FIELDS:
+            violations.append(f"line {node.lineno}: .{node.attr}")
+    assert not violations, f"selfcert.py touches gold fields: {violations}"
+
+
+def test_certifier_api_is_spec_only():
+    """Every public certifier entry point takes (spec, domain, entry) — no Task."""
+    import inspect
+    for fn in (SelfCertifier.certify, SelfCertifier.certify_code,
+               SelfCertifier.certify_math, SelfCertifier.propose_entry,
+               SelfCertifier.generate_test_bags):
+        params = list(inspect.signature(fn).parameters)
+        assert "task" not in params, f"{fn.__name__} accepts a task -> gold leak risk"
+
+
+# ---------------------------------------------------------------------------
+# 2) Parsing helpers
+# ---------------------------------------------------------------------------
+
+def test_parse_asserts_filters_and_dedupes():
+    txt = """Here are tests:
+```python
+assert add2(1, 2) == 3
+assert add2(0, 0) == 0
+assert add2(1,2) == 3
+assert other(1) == 1
+import os; assert add2(2, 2) == 4
+x = 1
+assert eval("add2(1,1)") == 2
+def add2(a, b): return a + b
+assert add2(-1, 1) == 0
+```
+"""
+    out = parse_asserts(txt, "add2")
+    assert "assert add2(1, 2) == 3" in out
+    assert "assert add2(0, 0) == 0" in out
+    assert "assert add2(-1, 1) == 0" in out
+    # no duplicate, no foreign entry, no import/eval/def lines
+    assert len(out) == len(set(out))
+    assert not any("other(" in t for t in out)
+    assert not any("import" in t or "eval" in t or t.startswith("def") for t in out)
+    assert parse_asserts(txt, "add2", max_tests=2) == out[:2]
+    assert parse_asserts(txt, "") == []
+
+
+def test_parse_entry_name():
+    assert parse_entry_name("def next_square(n):\n    return n") == "next_square"
+    assert parse_entry_name("I propose\n```python\ndef add2(a,b):\n```") == "add2"
+    assert parse_entry_name("no def here", fallback="solution") == "solution"
+
+
+def test_extract_and_format_number():
+    assert extract_number("The total is 42.") == "42"
+    assert extract_number("#### 1,234") == "1234"
+    assert extract_number("\\boxed{17}") == "17"
+    assert extract_number("no numbers") is None
+    assert format_number("42.0") == "42"
+    assert format_number("3.5") == "3.5"
+
+
+def test_sccl_prompt_uses_only_spec_and_entry():
+    p = sccl_prompt("Return the sum.", "add2", "code")
+    assert "add2" in p and "Return the sum." in p
+    m = sccl_prompt("What is 2+2?", "", "math")
+    assert "ONLY the final numeric answer" in m
+
+
+def test_interface_name_is_in_spec_and_propose_fast_path():
+    """MBPP specs must carry the interface name (HumanEval-style), and
+    propose_entry must read it from the spec without calling the model."""
+    from gcl.curriculum import StreamAssembler
+    fam = StreamAssembler(seed=42).build_family("mbpp", "arith", 2, 1, offset=0)
+    for t in fam.tasks + fam.holdout:
+        if t.entry_point:
+            assert f"`{t.entry_point}`" in t.prompt, t.task_id
+    sig_tasks = [t for t in fam.tasks + fam.holdout
+                 if t.entry_point and "signature" in t.prompt]
+    assert sig_tasks, "expected at least one MBPP task with a signature hint"
+
+    class _NoGen:
+        def generate(self, *a, **k):
+            raise AssertionError("fast path must not call the model")
+
+    t0 = fam.tasks[0]
+    ep = SelfCertifier().propose_entry(_NoGen(), t0.prompt)
+    assert ep == t0.entry_point
+    # math prompts carry no function name
+    mfam = StreamAssembler(seed=42).build_family("math", "m", 2, 1, offset=0)
+    assert "`" not in mfam.tasks[0].prompt
+
+
+def test_signature_hint_recovers_interface_only():
+    """The hint moves only the CALL INTERFACE into the spec — name, arity and
+    keyword names; never expected outputs."""
+    from gcl.curriculum import _signature_hint
+    assert _signature_hint("assert f(1, 2) == 3\nassert f(0, 0) == 0", "f") == \
+        "The function must be named `f` with signature `def f(x, y):`."
+    assert "no arguments" in _signature_hint("assert g() == 1", "g")
+    assert "def h(x, y):" in _signature_hint("assert h(x=1, y=2) == 3", "h")
+    # nested wrapper calls still resolve the entry-point call
+    assert "def p(x):" in _signature_hint("assert math.isclose(p(0.5), 0.5)", "p")
+    assert _signature_hint("", "f") == ""
+    assert _signature_hint("assert f(1) == 1", "") == ""
+
+
+# ---------------------------------------------------------------------------
+# Stub engine: canned generations routed by prompt content
+# ---------------------------------------------------------------------------
+
+class StubEngine:
+    """Returns scripted outputs. `mode` selects candidate quality for tests."""
+
+    def __init__(self):
+        self.test_bags = [
+            ["assert add2(1, 2) == 3", "assert add2(0, 0) == 0"],
+            ["assert add2(-1, 1) == 0", "assert add2(2, 3) == 5"],
+        ]
+        self.candidates = [
+            "```python\ndef add2(a, b):\n    return a + b\n```",          # correct
+            "```python\ndef add2(a, b):\n    return a - b\n```",          # wrong
+            "```python\ndef add2(a, b):\n    return 7\n```",              # wrong
+        ]
+        self.greedy_solution = self.candidates[0]
+        self.math_answers = ["42", "The answer is 42", "#### 42", "41", "42", "42", "43"]
+        self._bag_calls = 0
+        self.regen_code = None  # for RRV veto tests
+
+    def generate(self, prompt, adapter_on=True, greedy=False):
+        if "Propose a short snake_case name" in prompt:
+            return "def add2(a, b):"
+        if "writing unit tests" in prompt:
+            bag = self.test_bags[min(self._bag_calls, len(self.test_bags) - 1)]
+            self._bag_calls += 1
+            return "\n".join(bag)
+        if "ONLY the final numeric answer" in prompt:
+            return self.math_answers[0]
+        return self.greedy_solution
+
+    def sample_candidates(self, prompt, n, temperature=0.7, top_p=0.95,
+                          adapter_on=True, max_new_tokens=None):
+        if "ONLY the final numeric answer" in prompt:
+            return self.math_answers[:n]
+        if self.regen_code is not None:
+            return [self.regen_code] * n
+        return self.candidates[:max(1, n)]
+
+
+# ---------------------------------------------------------------------------
+# 3) Certification logic (real sandbox execution)
+# ---------------------------------------------------------------------------
+
+def test_certify_code_finds_correct_candidate():
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng, ver = StubEngine(), Verifier(sandbox=PythonSandbox())
+    cr = sc.certify_code(eng, ver, "Return the sum of two integers a and b.",
+                         entry="add2")
+    assert cr.found, f"expected certification, got conf={cr.confidence} diag={cr.diagnostics}"
+    assert "a + b" in cr.code
+    assert cr.confidence >= 0.65
+    assert cr.n_candidates == 3
+    assert cr.n_tests == 4
+    assert cr.n_discriminative >= 1
+    assert cr.self_tests, "certifying suite must be non-empty"
+    # the certifying suite must actually pass the winner (executed, not assumed)
+    _, info, _ = ver.reward(domain="code", code=cr.code,
+                            test_code="\n".join(cr.self_tests))
+    assert info["pass_rate"] >= 1.0
+
+
+def test_certify_code_refuses_weak_pool():
+    """Candidates that fail EVERY self-test form a weak pool: confidence is
+    capped below tau, so nothing is certified (no training on garbage)."""
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng, ver = StubEngine(), Verifier(sandbox=PythonSandbox())
+    eng.candidates = ["```python\ndef add2(a, b):\n    return 99\n```",
+                      "```python\ndef add2(a, b):\n    return 7\n```"]
+    eng.greedy_solution = eng.candidates[0]
+    cr = sc.certify_code(eng, ver, "Return the sum of two integers a and b.",
+                         entry="add2")
+    assert not cr.found
+    assert cr.confidence < 0.65
+    assert cr.diagnostics.get("weak_pool") is True
+
+
+def test_certify_code_unanimous_pool_certifies():
+    """When EVERY candidate passes EVERY self-test there is nothing left to
+    discriminate, but the unanimous consensus is itself evidence. Mastered
+    skills must certify so the vault can protect them via self-replay veto."""
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng, ver = StubEngine(), Verifier(sandbox=PythonSandbox())
+    eng.candidates = ["```python\ndef add2(a, b):\n    return a + b\n```",
+                      "```python\ndef add2(a, b):\n    return b + a\n```"]
+    eng.greedy_solution = eng.candidates[0]
+    cr = sc.certify_code(eng, ver, "Return the sum of two integers a and b.",
+                         entry="add2")
+    assert cr.found, f"unanimous pool must certify: conf={cr.confidence} diag={cr.diagnostics}"
+    assert cr.diagnostics.get("unanimous") is True
+    assert cr.diagnostics.get("weak_pool") is False
+    assert cr.confidence >= 0.65
+    assert cr.n_discriminative == 0
+    assert len(cr.self_tests) == cr.n_tests  # the whole suite certifies
+    _, info, _ = ver.reward(domain="code", code=cr.code,
+                            test_code="\n".join(cr.self_tests))
+    assert info["pass_rate"] >= 1.0
+
+
+def test_certify_code_nocons_ablation_scores_higher_or_equal():
+    """Without consensus weighting the raw discriminative rate is used."""
+    ver = Verifier(sandbox=PythonSandbox())
+    cr_cons = SelfCertifier(k=3, test_bags=2, consensus=True).certify_code(
+        StubEngine(), ver, "Return the sum of two integers a and b.", entry="add2")
+    cr_nocons = SelfCertifier(k=3, test_bags=2, consensus=False).certify_code(
+        StubEngine(), ver, "Return the sum of two integers a and b.", entry="add2")
+    assert cr_nocons.bag_agreement == cr_cons.bag_agreement
+    # winner identical; consensus can only shrink or equal the score (factor <= 1)
+    assert "a + b" in cr_nocons.code
+    assert cr_nocons.confidence >= cr_cons.confidence - 1e-9
+
+
+def test_certify_math_majority_vote():
+    sc = SelfCertifier(k=6, tau_math=0.6)
+    eng = StubEngine()
+    cr = sc.certify_math(eng, "What is 6 times 7?")
+    assert cr.found
+    assert cr.code == "42"
+    # 6 samples + 1 greedy = 7 answers; 6 of the scripted answers say 42
+    assert abs(cr.confidence - 6 / 7) < 1e-6
+    assert cr.diagnostics["votes"]["42"] == 6
+    assert cr.diagnostics["votes"]["41"] == 1
+
+
+def test_certify_dispatcher():
+    ver = Verifier(sandbox=PythonSandbox())
+    cr_m = SelfCertifier(k=6).certify(StubEngine(), ver, "What is 6 times 7?", "math")
+    assert cr_m.domain == "math"
+    cr_c = SelfCertifier(k=3).certify(StubEngine(), ver, "Return the sum.", "code",
+                                      entry="add2")
+    assert cr_c.domain == "code"
+
+
+# ---------------------------------------------------------------------------
+# 4) SelfCertVault + Self-Replay Veto
+# ---------------------------------------------------------------------------
+
+_CERT_CODE = "def add2(a, b):\n    return a + b"
+_CERT_TESTS = ["assert add2(1, 2) == 3", "assert add2(0, 0) == 0"]
+
+
+def test_commit_certified_and_to_pairs():
+    v = SelfCertVault()
+    ok = v.commit_certified(task_id="t1", family="f", spec="Return the sum.",
+                            prompt="You are an expert Python programmer.\nReturn the sum.\n```python\n",
+                            code=_CERT_CODE, self_tests=_CERT_TESTS, conf=0.9)
+    assert ok and len(v) == 1
+    # empty suite or empty code is refused
+    assert not v.commit_certified("t2", "f", "s", "p", _CERT_CODE, [], 0.9)
+    assert not v.commit_certified("t3", "f", "s", "p", "", _CERT_TESTS, 0.9)
+    pairs = v.to_pairs()
+    assert pairs[0]["target"] == _CERT_CODE and "```python" in pairs[0]["prompt"]
+
+
+def test_commit_certified_dedup():
+    # Stored embedding is embed(spec + code), so use a threshold below the
+    # spec-vs-(spec+code) similarity of near-identical specs.
+    v = SelfCertVault()
+    assert v.commit_certified("t1", "f", "Return the sum of two ints.", "p",
+                              _CERT_CODE, _CERT_TESTS, 0.9, dedup_sim=0.5)
+    # near-identical spec is deduped
+    assert not v.commit_certified("t2", "f", "Return the sum of two ints.", "p",
+                                  _CERT_CODE, _CERT_TESTS, 0.9, dedup_sim=0.5)
+    assert len(v) == 1
+
+
+def test_rrv_veto_passes_when_skill_regenerates():
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_certified("t1", "f", "Return the sum.", "PROMPT fid:t1\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a + b\n```"
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2)
+    assert not res["veto"], res
+    assert res["checked"] == 1
+
+
+def test_rrv_veto_fires_when_skill_lost():
+    """The gate must NOT fall back to the stored artifact: regeneration only."""
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_certified("t1", "f", "Return the sum.", "PROMPT fid:t1\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a - b\n```"  # broken
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2)
+    assert res["veto"] and "t1" in res["broke"], res
+
+
+def test_rrv_empty_vault_is_noop():
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=1)
+    assert not res["veto"] and res["checked"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 5) DYNAMIC poisoned-gold env test (decisions must ignore gold)
+# ---------------------------------------------------------------------------
+
+class _Meta:
+    def __init__(self, v):
+        self.version = v
+        self.content_hash = f"h{v}"
+
+
+class _Registry:
+    def __init__(self):
+        self.active_version = -1
+        self.n = 0
+
+    def register(self, op, meta):
+        self.n += 1
+        self.active_version = self.n - 1
+        return _Meta(self.active_version)
+
+    def history(self):
+        return []
+
+
+class FakeEngine:
+    """Minimal engine for env-level SCCL tests (no torch)."""
+
+    def __init__(self, cfg, regen_passes=True):
+        self.cfg = cfg
+        self.registry = _Registry()
+        self._replay = []
+        self.updates_done = 0
+        self.regen_passes = regen_passes
+        self.update_calls = 0
+
+    def _snapshot(self):
+        return {"n": self.updates_done, "replay": list(self._replay)}
+
+    def _restore(self, snap):
+        self.updates_done = snap["n"]
+        self._replay = snap["replay"]
+
+    def apply_update(self, pairs, **kw):
+        self.update_calls += 1
+        self._replay.extend(pairs)
+        self.updates_done += 1
+        return {"loss_start": 1.0, "loss_end": 0.2, "grad_norm": 0.5,
+                "n_pairs": len(pairs)}
+
+    def sample_candidates(self, prompt, n, temperature=0.7, top_p=0.95,
+                          adapter_on=True, max_new_tokens=None):
+        code = (_CERT_CODE if self.regen_passes
+                else "def add2(a, b):\n    return a - b")
+        return ["```python\n" + code + "\n```"] * max(1, n)
+
+    def holdout_score(self, holdout, verifier, adapter_on):
+        return 0.5
+
+    def register_adapter(self, op, meta):
+        return self.registry.register(op, meta)
+
+
+def _poisoned_task():
+    """Gold is WRONG on purpose: correct code gets gold reward ~0."""
+    return Task(task_id="t_gold_wrong", family="fam", domain="code",
+                prompt="Return the sum of two integers a and b.",
+                test_code="assert add2(1, 2) == 99",          # poisoned gold
+                reference_answer="def add2(a, b):\n    return 99",
+                entry_point="add2")
+
+
+def _sccl_env(regen_passes=True, learner="sccl", learners=None, nogate=None):
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg._learner_name = learner
+    cfg.sccl_learners = learners or ["sccl"]
+    cfg.sccl_nogate_learners = nogate or []
+    cfg.sccl_gate_probe = 0
+    eng = FakeEngine(cfg, regen_passes=regen_passes)
+    ver = Verifier(sandbox=PythonSandbox())
+    vault = SelfCertVault()
+    env = GroundedContinualEnv(cfg, eng, ver, [_make_family(_poisoned_task())],
+                               holdout=[], vault=vault, sccl=True)
+    return env, eng, ver, vault
+
+
+def _make_family(task):
+    from gcl.curriculum import Family
+    return Family(name="fam", tasks=[task], holdout=[])
+
+
+def _cert_meta(found=True, code=_CERT_CODE, tests=None):
+    return {"found": found, "code": code, "confidence": 0.9 if found else 0.2,
+            "self_tests": tests if tests is not None else list(_CERT_TESTS),
+            "prompt": "You are an expert Python programmer.\nReturn the sum of two integers a and b.\n```python\n",
+            "entry": "add2", "n_tests": 2, "n_discriminative": 2}
+
+
+def test_sccl_trains_on_certification_despite_poisoned_gold():
+    """Gold reward is ~0 (poisoned), but a certified target must still train."""
+    env, eng, ver, vault = _sccl_env()
+    # sanity: gold telemetry reward for the correct code must be ~0 under poisoned gold
+    r, info, _ = ver.reward(domain="code", code=_CERT_CODE,
+                            test_code="assert add2(1, 2) == 99", reference_answer="")
+    assert info["pass_rate"] == 0.0
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert reward < 0.5, "poisoned gold should score the correct code ~0 (telemetry)"
+    assert ui["target_source"] == "self_certified"
+    assert ui.get("executed") and ui.get("accepted"), ui
+    assert ui["gate"]["method"] == "sccl_rrv"
+    assert step_info["sccl"]["found"] is True
+    assert len(vault) == 1, "certified skill must be committed"
+
+
+def test_sccl_refuses_uncertified_despite_passing_gold():
+    """Answer passes POISONED gold (high reward) but is NOT certified -> no update."""
+    env, eng, ver, vault = _sccl_env()
+    bad_for_spec = "def add2(a, b):\n    return 99"   # passes poisoned gold
+    r, info, _ = ver.reward(domain="code", code=bad_for_spec,
+                            test_code="assert add2(1, 2) == 99", reference_answer="")
+    assert info["pass_rate"] >= 1.0, "sanity: must pass poisoned gold"
+    o, reward, done, step_info = env.step(Action(
+        answer=bad_for_spec, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=False, code=bad_for_spec)}))
+    ui = step_info["update_info"]
+    assert reward > 0.5, "telemetry shows gold would love this answer"
+    assert not ui.get("executed"), ui
+    assert ui.get("reason") == "no_verified_target"
+    assert eng.update_calls == 0
+    assert len(vault) == 0
+
+
+def test_sccl_rrv_rolls_back_when_prior_skill_regresses():
+    """Even a certified, gold-irrelevant update must roll back if the RRV gate
+    detects a previously certified skill can no longer be regenerated."""
+    env, eng, ver, vault = _sccl_env(regen_passes=False)
+    # seed a prior certified skill
+    vault.commit_certified("prior", "fam0", "Return the sum.",
+                           "PROMPT\n```python\n", _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("executed") and not ui.get("accepted"), ui
+    assert ui["gate"]["method"] == "sccl_rrv" and ui["gate"]["veto"]
+    assert env.rollback_count == 1 and env.update_count == 0
+
+
+def test_sccl_nogate_ablation_has_no_gate():
+    env, eng, ver, vault = _sccl_env(regen_passes=False, learner="sccl_nogate",
+                                     learners=["sccl"], nogate=["sccl_nogate"])
+    vault.commit_certified("prior", "fam0", "Return the sum.",
+                           "PROMPT\n```python\n", _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui["gate"]["method"] == "none"
+    assert ui.get("accepted"), "nogate ablation trains unconditionally"
+    assert env.rollback_count == 0
+
+
+def test_sccl_math_target_format():
+    from gcl.curriculum import Family
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg._learner_name = "sccl"
+    cfg.sccl_learners = ["sccl"]
+    cfg.sccl_gate_probe = 0
+    task = Task(task_id="m1", family="fam", domain="math",
+                prompt="What is 6 times 7?", test_code="",
+                reference_answer="999",          # poisoned gold
+                entry_point="")
+    eng = FakeEngine(cfg)
+    ver = Verifier(sandbox=PythonSandbox())
+    env = GroundedContinualEnv(cfg, eng, ver, [Family("fam", [task], [])],
+                               holdout=[], vault=SelfCertVault(), sccl=True)
+    meta = {"found": True, "code": "42", "confidence": 0.86, "self_tests": [],
+            "prompt": "Solve and give ONLY the final numeric answer.\nWhat is 6 times 7?\nAnswer: ",
+            "entry": "", "n_tests": 7, "n_discriminative": 0}
+    o, reward, done, step_info = env.step(Action(
+        answer="42", learn_op=LearnOp.UPDATE_LORA, metadata={"sccl": meta}))
+    ui = step_info["update_info"]
+    assert reward == 0.0, "poisoned gold reference -> telemetry reward 0"
+    assert ui.get("executed") and ui.get("accepted"), ui
+    assert ui["target_source"] == "self_certified"

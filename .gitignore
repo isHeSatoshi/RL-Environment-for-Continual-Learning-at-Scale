@@ -31,3 +31,13 @@ results_overnight/
 results_qwen35_*
 results_test_*
 test_results/
+
+# Experiment run artifacts (adapters, checkpoints, trajectories — regenerable)
+runs/
+runs_sccl_*_log.txt
+
+# LaTeX build artifacts (sources + generated results*.tex + main.pdf are tracked)
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/compile.log

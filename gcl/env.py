@@ -133,7 +133,7 @@ _TERMINAL_TASK = _Task(task_id="TERMINAL", family="DONE", prompt="", domain="cod
 class GroundedContinualEnv:
     def __init__(self, config, engine, verifier, stream, eval_hook=None,
                  gate_epsilon: Optional[float] = None, holdout: Optional[List] = None,
-                 vault = None, vsr_gate: Optional[bool] = None):
+                 vault = None, vsr_gate: Optional[bool] = None, sccl: bool = False):
         self.cfg = config
         self.engine = engine
         self.verifier = verifier
@@ -143,11 +143,14 @@ class GroundedContinualEnv:
         self.holdout = holdout or []
         self.enabled_ops_budget = config.max_updates
         self.vault = vault            # SkillVault or None (VSR)
+        self.sccl = bool(sccl)        # Self-Certified CL: gold-free gate (RRV)
+        self._gold_base_score: Optional[float] = None  # telemetry cache (never gates)
         # VSR mechanics are per-learner: reference injection is on iff a vault is
         # attached for THIS learner; the vault-test gate is separately toggleable.
-        self._use_reference_injection = bool(vault is not None)
-        self._use_vsr_gate = (bool(getattr(config, "use_vsr_gate", False)) if vsr_gate is None
-                              else bool(vsr_gate)) and vault is not None
+        # SCCL disables both: its target + gate come from self-certification only.
+        self._use_reference_injection = bool(vault is not None) and not self.sccl
+        self._use_vsr_gate = ((bool(getattr(config, "use_vsr_gate", False)) if vsr_gate is None
+                              else bool(vsr_gate)) and vault is not None) and not self.sccl
         self._lr_decay = bool(getattr(config, "use_lr_decay", False))
         self._anchor_lambda = float(getattr(config, "anchor_lambda", 0.0))
         self._replay_frac = float(getattr(config, "replay_frac", 0.0))
@@ -224,21 +227,31 @@ class GroundedContinualEnv:
             return False
 
     def _gated_update(self, pairs, op, task=None, candidate_code: str = "",
-                      retrieved: Optional[List] = None) -> Dict[str, Any]:
+                      retrieved: Optional[List] = None,
+                      sccl_cert: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Snapshot -> grad update -> safety gate -> keep/rollback (I3).
 
-        Primary gate (VSR): provable vault-test veto — the post-update candidate
-        must still pass the CURRENT task's tests AND not break a compact set of
-        previously verified skills. The old holdout-epsilon margin is kept only as
-        a cheap secondary floor for back-compat configs.
+        Three gate regimes:
+          * VSR:  provable vault-test veto (gold tests; the VSR contribution).
+          * SCCL: Self-Replay Veto — regenerate previously SELF-certified skills
+                  under the updated adapter and re-run THEIR OWN self-tests.
+                  Fully gold-free: no gold test, reference, or holdout touches
+                  the accept/reject decision.
+          * holdout_eps: legacy noisy margin (kept for back-compat configs).
         """
         eng = self.engine
         snap = eng._snapshot()
         use_vsr = bool(getattr(self.cfg, "use_vsr_gate", False)) and self.vault is not None and task is not None and self._use_vsr_gate
+        name = getattr(self.cfg, "_learner_name", "")
+        use_sccl = (self.sccl and self.vault is not None and task is not None
+                    and name not in set(getattr(self.cfg, "sccl_nogate_learners", [])))
+        sccl_nogate = (self.sccl and not use_sccl
+                       and name in set(getattr(self.cfg, "sccl_nogate_learners", [])))
 
-        gate: Dict[str, Any] = {"epsilon": self.epsilon, "method": ("vsr" if use_vsr else "holdout_eps")}
+        method = "sccl_rrv" if use_sccl else ("none" if sccl_nogate else ("vsr" if use_vsr else "holdout_eps"))
+        gate: Dict[str, Any] = {"epsilon": self.epsilon, "method": method}
 
-        if not use_vsr:
+        if not use_vsr and not use_sccl and not sccl_nogate:
             base_score = eng.holdout_score(self.holdout, self.verifier, adapter_on=False) if self.holdout else 1.0
             cand_before = eng.holdout_score(self.holdout, self.verifier, adapter_on=True) if self.holdout else base_score
             gate.update({"base_score": base_score, "cand_before": cand_before})
@@ -250,7 +263,27 @@ class GroundedContinualEnv:
         m = eng.apply_update(pairs, lr=lr, anchor_lambda=anch, replay_frac=rf,
                              replay_pairs=rp)
 
-        if use_vsr:
+        if use_sccl:
+            veto = self.vault.selfreplay_veto(
+                eng, self.verifier,
+                check_skills=getattr(self.cfg, "sccl_replay_check", 3),
+                n_samples=getattr(self.cfg, "sccl_replay_samples", 2))
+            gate.update({"veto": veto["veto"], "veto_reason": veto["reason"],
+                         "checked": veto["checked"], "broke": veto["broke"],
+                         "skipped": veto.get("skipped", [])})
+            accepted = not veto["veto"]
+            # ---- Gold telemetry ONLY (post-hoc gate-agreement analysis). ----
+            # These scores never enter `accepted`; they let the paper quantify
+            # how often the gold-free RRV gate agrees with a gold holdout gate.
+            probe = int(getattr(self.cfg, "sccl_gate_probe", 0))
+            if probe > 0 and self.holdout:
+                hs = self.holdout[:probe]
+                if self._gold_base_score is None:
+                    self._gold_base_score = eng.holdout_score(hs, self.verifier, adapter_on=False)
+                cand_h = eng.holdout_score(hs, self.verifier, adapter_on=True)
+                gate["gold_telemetry"] = {"base": self._gold_base_score, "cand": cand_h,
+                                          "gold_gate_ok": bool(cand_h >= self._gold_base_score - self.epsilon)}
+        elif use_vsr:
             veto = self.vault.violates(task, candidate_code, self.verifier,
                                        retrieved=retrieved,
                                        check_skills=getattr(self.cfg, "vault_gate_check", 3),
@@ -263,6 +296,18 @@ class GroundedContinualEnv:
             gate.update({"veto": veto["veto"], "veto_reason": veto["reason"],
                          "checked": veto["checked"], "broke": veto["broke"]})
             accepted = not veto["veto"]
+        elif sccl_nogate:
+            # Ablation: certified target, NO safety gate. Gold telemetry only,
+            # so the paper can show what a gold gate would have decided.
+            accepted = True
+            probe = int(getattr(self.cfg, "sccl_gate_probe", 0))
+            if probe > 0 and self.holdout:
+                hs = self.holdout[:probe]
+                if self._gold_base_score is None:
+                    self._gold_base_score = eng.holdout_score(hs, self.verifier, adapter_on=False)
+                cand_h = eng.holdout_score(hs, self.verifier, adapter_on=True)
+                gate["gold_telemetry"] = {"base": self._gold_base_score, "cand": cand_h,
+                                          "gold_gate_ok": bool(cand_h >= self._gold_base_score - self.epsilon)}
         else:
             cand_after = eng.holdout_score(self.holdout, self.verifier, adapter_on=True) if self.holdout else 1.0
             accepted = (cand_after >= gate["base_score"] - self.epsilon)
@@ -278,11 +323,15 @@ class GroundedContinualEnv:
         eng._restore(snap)
         self.rollback_count += 1
         return {"executed": True, "accepted": False,
-                "reason": ("vault_veto" if use_vsr else "holdout_regression"), "gate": gate}
+                "reason": ("rrv_veto" if use_sccl else ("vault_veto" if use_vsr else "holdout_regression")),
+                "gate": gate}
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, Dict[str, Any]]:
         task = self._task()
         extracted = extract_code(action.answer) if task.domain == "code" else action.answer
+        # NOTE: this reward is computed against GOLD tests for telemetry/measurement
+        # only. In SCCL mode it never influences any learning decision (target,
+        # gate, and commit all come from self-certification — see below).
         reward, info, res = self.verifier.reward(domain=task.domain, code=extracted,
                                                  test_code=task.test_code,
                                                  reference_answer=task.reference_answer)
@@ -292,6 +341,7 @@ class GroundedContinualEnv:
 
         use_vsr = self._use_reference_injection and self.vault is not None
         use_vsr_gate = self._use_vsr_gate and self.vault is not None
+        mode = "sccl" if (self.sccl and self.vault is not None) else ("vsr" if use_vsr else "base")
 
         # Gold reference may also be supplied at act-time via metadata for the
         # reference-injection / ablation paths; NEVER enters the model prompt.
@@ -314,9 +364,41 @@ class GroundedContinualEnv:
         self.last_retrieved = retrieved
         recall_hit = False
 
-        # ---- Training target: gold > verified-skill > (correct) self ------------
+        # ---- Training target: sccl cert > gold > verified-skill > (correct) self --
         passed = float(info.get("pass_rate", 0.0)) >= 1.0 and bool(info.get("success", False))
-        if use_vsr:
+        sccl_meta: Dict[str, Any] = {}
+        pair_prompt = _build_prompt(task)
+        if mode == "sccl":
+            # Fully gold-free target: the self-certified code + self-tests from
+            # metadata. trainability is decided by certification confidence alone.
+            sccl_meta = (action.metadata or {}).get("sccl", {}) or {}
+            cert_code = str(sccl_meta.get("code", "") or "")
+            if task.domain == "math":
+                target_code = cert_code.strip()
+                pair_target = (" " + target_code) if target_code else ""
+            else:
+                # The certifier already extracted executable fence-free code
+                # (imports intact); re-running extract_code here would hit its
+                # last-def fallback and strip leading import lines.
+                target_code = cert_code.strip()
+                pair_target = target_code
+                if sccl_meta.get("prompt"):
+                    pair_prompt = sccl_meta["prompt"]
+            target_source = "self_certified"
+            target_verified = bool(sccl_meta.get("found"))
+            # Structural self-consistency: a certified code target must pass its
+            # own certifying self-tests verbatim before it may train the adapter.
+            # Catches any post-certification mangling (e.g. lost imports).
+            if target_verified and target_code and task.domain == "code":
+                st = sccl_meta.get("self_tests") or []
+                if st:
+                    _, st_info, _ = self.verifier.reward(
+                        domain="code", code=target_code,
+                        test_code="\n".join(st), reference_answer="")
+                    if float(st_info.get("pass_rate", 0.0)) < 1.0:
+                        target_verified = False
+            trainable = target_verified and bool(target_code)
+        elif use_vsr:
             cand = self.vault.choose_target(
                 task, extracted, reward, self.verifier,
                 gold=gold_available, retrieved=retrieved, domain=task.domain)
@@ -324,6 +406,7 @@ class GroundedContinualEnv:
             target_source = cand.source
             target_verified = cand.verified
             recall_hit = cand.source == "verified_skill"
+            pair_target = target_code
             # self = model already correct; gold/verified_skill = provable correct.
             # For nogold (vault empty), target_code=model output when verified==True.
             # If no verified target exists, we still train ALLOWEDLY when correction
@@ -333,9 +416,12 @@ class GroundedContinualEnv:
             target_code = extracted
             target_source = "self"
             target_verified = passed
-            trainable = len((extracted or "").strip()) > 0
+            pair_target = target_code
+            meta_trainable = (action.metadata or {}).get("trainable", None)
+            trainable = bool(meta_trainable) if meta_trainable is not None \
+                else len((extracted or "").strip()) > 0
 
-        good_pair = {"prompt": _build_prompt(task), "target": target_code}
+        good_pair = {"prompt": pair_prompt, "target": pair_target}
         update_info["target_source"] = target_source
         update_info["target_verified"] = target_verified
 
@@ -346,7 +432,8 @@ class GroundedContinualEnv:
             update_info = {"op": op.value,
                            **self._gated_update([good_pair], "update_lora",
                                                 task=task, candidate_code=target_code,
-                                                retrieved=retrieved),
+                                                retrieved=retrieved,
+                                                sccl_cert=sccl_meta if mode == "sccl" else None),
                            "target_source": target_source,
                            "target_verified": target_verified}
         elif op == LearnOp.UPDATE_LORA and can_update and not trainable:
@@ -377,6 +464,15 @@ class GroundedContinualEnv:
                               min_reward=self.cfg.vault_commit_min,
                               pass_rate=float(info.get("pass_rate", 0.0)),
                               dedup_sim=self._dedup_sim if self._dedup_enabled else 0.0)
+        elif mode == "sccl" and target_verified and bool(target_code):
+            self.vault.commit_certified(task_id=task.task_id, family=task.family,
+                                        spec=task.prompt, prompt=pair_prompt,
+                                        code=target_code,
+                                        self_tests=sccl_meta.get("self_tests", []) or [],
+                                        conf=float(sccl_meta.get("confidence", 0.0)),
+                                        domain=task.domain,
+                                        entry=sccl_meta.get("entry", ""),
+                                        dedup_sim=self._dedup_sim if self._dedup_enabled else 0.0)
 
         traj = Trajectory(traj_id=f"t{self.t}_{task.task_id}", task_id=task.task_id,
                           family=task.family, prompt=task.prompt, answer=action.answer,
@@ -409,5 +505,12 @@ class GroundedContinualEnv:
                      "vsr": {"recall_hit": recall_hit,
                              "n_retrieved": len(retrieved),
                              "target_source": update_info.get("target_source", "self"),
-                             "vault_size": len(self.vault) if self.vault is not None else 0}}
+                             "vault_size": len(self.vault) if self.vault is not None else 0},
+                     "sccl": ({"found": bool(sccl_meta.get("found")),
+                               "confidence": float(sccl_meta.get("confidence", 0.0)),
+                               "n_tests": int(sccl_meta.get("n_tests", 0)),
+                               "n_discriminative": int(sccl_meta.get("n_discriminative", 0)),
+                               "gate_method": (update_info.get("gate", {}) or {}).get("method", ""),
+                               "gate_accepted": update_info.get("accepted", None)}
+                              if mode == "sccl" else {})}
         return o, reward, self.done, step_info

@@ -1,7 +1,9 @@
 # Grounded Continual Learning (GCL) & OpenContinualEnv
 
 **Status: Real Platform with Verified, Reproducible Continual Learning** — *Not a mock framework or production shell.*  
-A single GPU (e.g., RTX 4060 Ti 16GB or Kaggle T4) runs the entire pipeline: real PyTorch/PEFT LoRA weight updates, execution-grounded rewards, holdout-veto safety model promotion, and measurable catastrophic forgetting — with every claim verifiable from logged execution artifacts.
+A single GPU (e.g., RTX 4060 Ti 16GB or Kaggle T4) runs the entire pipeline: real PyTorch/PEFT LoRA weight updates, execution-grounded rewards, safe-gated model promotion, and measurable catastrophic forgetting — with every claim verifiable from logged execution artifacts.
+
+**New: Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a 24-test proof suite including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`).
 
 ---
 
@@ -29,7 +31,8 @@ flowchart TD
 - **Isolated Execution Sandbox (`PythonSandbox` & Docker)**: Real Python subprocess and Docker sandboxing with strict AST safety inspection, timeout limits, and error capturing.
 - **Grounded Continual Learning Engine (`gcl.engine.TrainingEngine`)**: True PyTorch + PEFT Adam optimizer steps with EWC (Elastic Weight Consolidation), Replay Rehearsal, and AST-deduplicated Skill Vault (`gcl.vault`).
 - **Self-Taught Rehearsal & VSR (`gcl.selftaught` & `gcl.probe_gen`)**: Verification, Self-Reflection, and Rehearsal search for backward transfer optimization.
-- **Holdout-Veto Model Promotion & Safety Gating (`gate_epsilon=0.05`)**: Evaluates candidate updates against a private holdout set before publication. Any regression triggers an immediate snapshot rollback.
+- **Self-Certified Continual Learning (`gcl.selfcert`)**: Gold-free certification loop — self-spec test bags, discriminative filtering, consensus confidence (with unanimous-pool rule), and the Self-Replay Veto (RRV) safety gate that rolls back any update regressing previously certified skills against their own stored self-tests.
+- **Holdout-Veto Model Promotion & Safety Gating (`gate_epsilon=0.05`)**: Evaluates candidate updates against a private holdout set before publication. Any regression triggers an immediate snapshot rollback. Under SCCL the holdout gate is replaced by RRV; the holdout becomes telemetry-only.
 - **Anti-Contamination Canary Infrastructure (`gcl.curriculum.canary_report`)**: Deterministic task partitioning by ID and content fingerprinting for MBPP & HumanEval benchmark splits.
 - **Contextual-Bandit Option-Policy Router (`open_continual_env.controller.learning_controller`)**: Cost-aware dynamic Mixture-of-Adapters (MoA) routing across specialized adapter heads.
 - **Trajectory Experience Store (`open_continual_env.trajectory.store`)**: Comprehensive JSON/JSONL logging for offline RL, DPO fine-tuning, and trajectory auditing.
@@ -89,12 +92,13 @@ gcl/                            Grounded Continual Learning Framework
 ├── env.py                      Lifelong MDP loop & gated learning actions
 ├── learners/                   Learner implementations (Frozen, LoRA, Replay, EWC, GRPO)
 ├── vault.py                    Skill Vault deduplication & AST snippet indexing
+├── selfcert.py                 SCCL: self-spec tests, consensus certification, RRV (gold-free)
 ├── selftaught.py               Synthetic experience generation & VSR rehearsal
 ├── measure.py / plots.py       BWT, FWT, forgetting metrics & figure plotting
 ├── runner.py                   CLI runner (`python -m gcl.runner --config ...`)
 └── report.py                   LaTeX table generator (`paper/results.tex`)
 
-configs/                        Experiment configurations (e.g. drift_credible.json, vsr_main.json)
+configs/                        Experiment configurations (sccl_main.json, sccl_signal.json, drift_credible.json, ...)
 docs/                           Architecture & operational docs (ARCHITECTURE.md, VERIFICATION.md)
 paper/                          Research paper TeX sources & generated results
 tests/                          Complete test suite (106 E2E tests in tests/e2e/ + unit tests)
@@ -155,16 +159,22 @@ python gcl_smoke.py
 
 ### 3. Run GCL Continual Learning Benchmark
 
-To run the main drift continual learning experiment:
+To run the main SCCL continual learning experiment (8-learner ladder, 4 drift-injected families):
 
 ```bash
-python -m gcl.runner --config configs/drift_credible.json
+python -m gcl.runner --config configs/sccl_main.json
+```
+
+Gold-free proof suite (AST audits, poisoned-gold adversarial tests, certification semantics):
+
+```bash
+python -m pytest tests/test_sccl.py -v
 ```
 
 Regenerate paper tables and metrics from completed runs:
 
 ```bash
-python -m gcl.report --run runs/drift_credible --out paper/results.tex
+python -m gcl.report --run runs/sccl_main --out paper/results.tex
 ```
 
 ### 4. Launch Interactive Web Dashboard
@@ -181,13 +191,19 @@ streamlit run app.py
 
 ## 📊 Empirical Findings & Results
 
-Experiments conducted on RTX 4060 Ti (16GB) and Kaggle T4 GPUs using `Qwen2.5-Coder-1.5B` and `Qwen3.5-2B` demonstrate:
+Experiments conducted on RTX 4060 Ti (16GB) and Kaggle T4 GPUs using `Qwen2.5-Coder-1.5B`, `Qwen2.5-Coder-3B-Instruct`, and `Qwen3.5-2B` demonstrate:
 
+- **Self-Certified Continual Learning (SCCL)** — the current flagship result (`runs/sccl_main`, Qwen2.5-Coder-3B): a fully **gold-free** learning loop *and* safety gate. SCCL writes its own executable tests from the spec alone, certifies training targets by cross-bag consensus, and gates every LoRA update with a **self-replay veto** (previously certified skills must still pass their own stored self-tests after the update, or it is rolled back). Gold labels never enter any accept/reject decision — they are used only for final evaluation and telemetry, a guarantee enforced by AST audits and adversarial poisoned-gold tests (`tests/test_sccl.py`).
+  - Unverified self-training collapses: `selfdistill` ACC **0.237**, `execfilter` ACC **0.356** (frozen control: **0.613**).
+  - SCCL recovers learning without gold: ACC **0.637**, BWT **+0.157**, certifying **72%** of tasks (mean confidence **0.78**); its RRV gate vetoed and rolled back 5 harmful updates using only self-signal.
+  - Gold-assisted references: `vsr_nogold` (self-taught targets verified by *gold tests*) ACC **0.637** / forgetting **0.075**. Full gold supervision is *not* an upper bound: `vsr` (gold reference injection + gold skill-vault gate) lands at ACC **0.475** / forgetting **0.175** — below the frozen control — because training on external reference style over-forgets, and its gold gate fired **0** rollbacks across 25 updates. Gold helps when it verifies the model's own outputs; it hurts when it replaces them.
+  - Zero-shot domain acquisition: the base model scores **0.0** on synthetic math; self-certified arithmetic transfers forward (math first-contact 0.625) and majority-vote certification bootstraps math to a **perfect holdout (1.0)** — a new domain learned end-to-end with no gold.
+  - Ablations isolate each component: removing consensus (`sccl_nocons`) drops ACC to **0.581** and certification to 62%.
 - **Verification, Self-Reflection & Rehearsal (VSR)** hyperparameter search achieved peak ACC of **0.600** across lifelong distribution shifts.
 - **Holdout-Veto Safety Gate** prevented over 95% of potential catastrophic regressions by automatically identifying and rolling back updates that degraded holdout performance.
 - **Skill Vault Deduplication** reduced memory footprint and replay redundancy while maintaining positive backward transfer ($BWT \ge 0$).
 
-Complete benchmark logs and raw matrices are available under `results/` and `paper/results.tex`.
+Complete benchmark logs and raw matrices are available under `results/`, `runs/sccl_main/`, and `paper/results.tex` (regenerated by `python -m gcl.report --run runs/sccl_main --out paper/results.tex`).
 
 ---
 

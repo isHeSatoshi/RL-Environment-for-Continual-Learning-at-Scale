@@ -4,6 +4,8 @@
 **Date:** July 2026  
 **Repository:** `https://github.com/open-continual-env/open_continual_env`
 
+> **Update (August 2026):** This platform now hosts **Self-Certified Continual Learning (SCCL)** — a gold-free certification loop (self-spec test bags → discriminative consensus → self-replay veto) in which no gold labels enter the learning loop or the safety gate. See `paper/main.tex` for the SCCL paper and `tests/test_sccl.py` for the structural gold-free proof suite.
+
 ---
 
 ## Abstract

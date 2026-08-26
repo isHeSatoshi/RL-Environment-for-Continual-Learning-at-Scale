@@ -57,6 +57,21 @@ class ExperimentConfig:
     self_taught_temp: float = 0.7       # sampling temperature for diversity
     self_taught_repair_rounds: int = 1  # in-context repair rounds on failure
     self_taught_repair_k: int = 2       # candidates per repair round (greedy-ish)
+
+    # ---- Self-Certified Continual Learning (SCCL): fully gold-free ----
+    sccl_learners: List[str] = field(default_factory=lambda: ["sccl"])
+    sccl_k: int = 6                     # diverse candidates per certification
+    sccl_temp: float = 0.8              # candidate sampling temperature
+    sccl_test_bags: int = 2             # independent self-test bags (consensus)
+    sccl_tests_per_bag: int = 4         # asserts requested per bag
+    sccl_tau: float = 0.65              # certification threshold (code)
+    sccl_tau_math: float = 0.6          # certification threshold (math majority)
+    sccl_derive_entry: bool = True      # derive entry name from spec (no gold parse)
+    sccl_nogate_learners: List[str] = field(default_factory=list)   # certify, no RRV veto
+    sccl_nocons_learners: List[str] = field(default_factory=list)   # certify, no consensus
+    sccl_replay_check: int = 3          # certified skills re-checked per gated update
+    sccl_replay_samples: int = 2        # regeneration attempts per skill in RRV veto
+    sccl_gate_probe: int = 4            # gold-agreement telemetry probe size (eval only)
     # output
     out_dir: str = "runs/run"
     seed: int = 42

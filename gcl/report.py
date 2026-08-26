@@ -44,6 +44,17 @@ def write_results_tex(metrics_path: str, out_tex: str) -> Dict[str, Any]:
         lines.append(_macro(f"{safe}updates", str(d["updates"])))
         lines.append(_macro(f"{safe}rollbacks", str(d["rollbacks"])))
         lines.append(_macro(f"{safe}frontier", _sign(d["frontier_score"])))
+        sc = d.get("sccl")
+        if isinstance(sc, dict):
+            lines.append(_macro(f"{safe}certrate", _fmt(sc.get("cert_rate", 0.0))))
+            lines.append(_macro(f"{safe}meanconf", _fmt(sc.get("mean_conf", 0.0))))
+            lines.append(_macro(f"{safe}goldagree", _fmt(sc.get("gold_agreement", 0.0))))
+            lines.append(_macro(f"{safe}rrvupdates", str(sc.get("rrv_updates", 0))))
+            lines.append(_macro(f"{safe}rrvvetoes", str(sc.get("rrv_vetoes", 0))))
+        vs = d.get("vsr")
+        if isinstance(vs, dict):
+            lines.append(_macro(f"{safe}vaultsize", str(vs.get("vault_size", 0))))
+            lines.append(_macro(f"{safe}recallrate", _fmt(vs.get("recall_rate", 0.0))))
         lines.append("")
 
     canary = m.get("canary", {})

@@ -155,6 +155,47 @@ def _load_humaneval(max_n: int, seed: int) -> List[Dict]:
     return out
 
 
+# ----------------------- interface normalization (spec, not supervision) ------
+def _signature_hint(test_code: str, ep: str) -> str:
+    """Recover the CALL INTERFACE (name + arity + keyword names) from the first
+    test call and render it as specification text. Only the interface is moved —
+    never expected outputs — so this mirrors HumanEval's signature-in-prompt
+    convention: the caller's API contract is part of the task, while supervision
+    (pass/fail verdicts + reference implementation) remains gold.
+    """
+    if not ep or not test_code:
+        return ""
+    import ast as _ast
+    for line in (test_code or "").splitlines():
+        line = line.strip()
+        if not line.startswith("assert"):
+            continue
+        try:
+            tree = _ast.parse(line)
+        except SyntaxError:
+            continue
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.Call):
+                continue
+            f = node.func
+            name = f.id if isinstance(f, _ast.Name) else \
+                (f.attr if isinstance(f, _ast.Attribute) else "")
+            if name != ep:
+                continue
+            letters = "xyzwvutsrq"
+            args = [letters[i] if i < len(letters) else f"a{i}"
+                    for i in range(len(node.args))]
+            kws = [kw.arg for kw in node.keywords
+                   if kw.arg and kw.arg not in args]
+            params = args + kws
+            if not params:
+                return (f"The function must be named `{ep}` and take no "
+                        "arguments.")
+            sig = f"def {ep}({', '.join(params)}):"
+            return f"The function must be named `{ep}` with signature `{sig}`."
+    return ""
+
+
 class StreamAssembler:
     """Builds train/held-out family streams with anti-contamination + drift."""
 
@@ -180,8 +221,20 @@ class StreamAssembler:
         train_raw, hold_raw = raw[:n_train], raw[n_train:]
 
         def mk(rd, canary):
+            prompt, ep = rd["prompt"], rd["entry_point"]
+            # Interface normalization: the CALL INTERFACE (name + signature) is
+            # part of the task specification (like a HumanEval signature in the
+            # prompt), not supervision. Gold remains the unit-test verdicts +
+            # reference implementation only. Without this, MBPP-style specs hide
+            # the interface inside the gold tests and any gold-free agent fails
+            # on NameError/TypeError regardless of its logic.
+            if corpus != "math" and ep and (ep + "(") not in prompt \
+                    and f"`{ep}`" not in prompt:
+                hint = _signature_hint(rd["test_code"], ep) \
+                    or f"The function must be named `{ep}`."
+                prompt = prompt.rstrip() + "\n" + hint
             return Task(task_id=rd["task_id"], family=name, domain=("math" if corpus == "math" else "code"),
-                        prompt=rd["prompt"], test_code=rd["test_code"],
+                        prompt=prompt, test_code=rd["test_code"],
                         reference_answer=rd["reference"], entry_point=rd["entry_point"],
                         canary=canary)
 

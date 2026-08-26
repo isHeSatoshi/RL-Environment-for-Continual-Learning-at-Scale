@@ -1,0 +1,38 @@
+{
+  "_comment": "SCCL quick signal run — debug the gold-free pipeline end-to-end on Qwen2.5-Coder-3B. 3 families x 3 train tasks; SCCL learner only.",
+  "stream": {
+    "seed": 42,
+    "families": [
+      {"corpus": "mbpp", "name": "arith", "n_train": 3, "n_holdout": 2, "offset": 0},
+      {"corpus": "math", "name": "math_word", "n_train": 3, "n_holdout": 2, "offset": 0},
+      {"corpus": "mbpp", "name": "string", "n_train": 3, "n_holdout": 2, "offset": 12}
+    ]
+  },
+  "experiment": {
+    "model_name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "learning_rate": 0.0003,
+    "train_steps_per_update": 4,
+    "max_updates": 20,
+    "temperature": 0.1,
+    "max_new_tokens": 256,
+    "gate_epsilon": 0.05,
+    "holdout_size": 6,
+    "sccl_learners": ["sccl"],
+    "sccl_k": 4,
+    "sccl_temp": 0.8,
+    "sccl_test_bags": 2,
+    "sccl_tests_per_bag": 3,
+    "sccl_tau": 0.65,
+    "sccl_tau_math": 0.6,
+    "sccl_derive_entry": true,
+    "sccl_replay_check": 2,
+    "sccl_replay_samples": 2,
+    "sccl_gate_probe": 2,
+    "out_dir": "runs/sccl_signal",
+    "seed": 42
+  },
+  "learners": ["sccl"],
+  "out_dir": "runs/sccl_signal"
+}

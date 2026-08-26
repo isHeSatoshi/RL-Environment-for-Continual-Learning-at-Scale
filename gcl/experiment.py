@@ -106,7 +106,25 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         vsr_gate = False
         vsr_set = set(getattr(cfg, "vsr_learners", ["vsr"]))
         ref_set = set(getattr(cfg, "refinject_learners", ["vsr"]))
-        if name in vsr_set or name in ref_set:
+        sccl_set = (set(getattr(cfg, "sccl_learners", [])) |
+                    set(getattr(cfg, "sccl_nogate_learners", [])) |
+                    set(getattr(cfg, "sccl_nocons_learners", [])))
+        is_sccl = name in sccl_set
+        certifier = None
+        if is_sccl:
+            from .vault import SelfCertVault
+            from .selfcert import SelfCertifier
+            vault = SelfCertVault(directory=os.path.join(out_dir, f"vault_{name}"))
+            certifier = SelfCertifier(
+                k=getattr(cfg, "sccl_k", 6), temp=getattr(cfg, "sccl_temp", 0.8),
+                test_bags=getattr(cfg, "sccl_test_bags", 2),
+                tests_per_bag=getattr(cfg, "sccl_tests_per_bag", 4),
+                tau=getattr(cfg, "sccl_tau", 0.65),
+                tau_math=getattr(cfg, "sccl_tau_math", 0.6),
+                consensus=name not in set(getattr(cfg, "sccl_nocons_learners", [])))
+            print(f"[GCL] [{name}] SelfCert Vault enabled (gold-free RRV gate, "
+                  f"tau={certifier.tau}, consensus={certifier.consensus}) -> {vault.directory}", flush=True)
+        elif name in vsr_set or name in ref_set:
             from .vault import SkillVault
             vault = SkillVault(directory=os.path.join(out_dir, f"vault_{name}"))
             vsr_gate = name in vsr_set
@@ -122,15 +140,22 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
             if fi < nF - 1:
                 first_contact[fi + 1] = _eval_family(eng, verifier, families[fi + 1], adapter_on=True)
 
+        # Gold-free ladder semantics: the unsafe baselines (selfdistill/execfilter)
+        # must NOT get a gold holdout gate (that would make them safe by gold).
+        # SCCL variants receive the holdout ONLY as gold telemetry for the
+        # gate-agreement analysis; their accept/reject decision never uses it.
+        gate_holdout = [] if name in ("selfdistill", "execfilter") else holdout
         env = GroundedContinualEnv(cfg, engine, verifier, families,
                                    eval_hook=first_contact_hook,
-                                   gate_epsilon=cfg.gate_epsilon, holdout=holdout,
-                                   vault=vault, vsr_gate=vsr_gate)
+                                   gate_epsilon=cfg.gate_epsilon, holdout=gate_holdout,
+                                   vault=vault, vsr_gate=vsr_gate, sccl=is_sccl)
         # 2) continual stream
         trajs_path = os.path.join(out_dir, f"trajectories_{name}.jsonl")
         learning_curve, rewards, fam_curve = [], [], []
         updates = rollbacks = 0
         recall_hits = recall_probe_total = 0
+        sccl_stats = {"steps": 0, "certified": 0, "rrv_updates": 0, "rrv_vetoes": 0,
+                      "gold_probes": 0, "gold_agree": 0, "cert_conf_sum": 0.0}
         t0 = time.time()
         obs = env.reset()
         last_family_seen = 0
@@ -139,35 +164,63 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         FLUSH_EVERY = 4
         with open(trajs_path, "w") as tf:
             while not env.done:
-                # VSR: retrieval-grounded generation (forward transfer). Controls:
-                # unchanged learner prompt. Gold reference is metadata only.
-                prompt = env.build_prompt() if vault is not None else learner.act_prompt(obs)
-                # Self-taught (no-gold) learners run pass@K + self-repair instead of a
-                # single generation; they learn only from execution reward.
-                is_self_taught = name in set(getattr(cfg, "self_taught_learners", ["vsr_nogold", "vsr_self"]))
-                if is_self_taught:
-                    from .selftaught import self_taught_solve
-                    st = self_taught_solve(engine, verifier, env._task(),
-                                           k_samples=getattr(cfg, "self_taught_k", 4),
-                                           temp=getattr(cfg, "self_taught_temp", 0.7),
-                                           repair_rounds=getattr(cfg, "self_taught_repair_rounds", 1),
-                                           repair_k=getattr(cfg, "self_taught_repair_k", 2),
-                                           commit_min=getattr(cfg, "vault_commit_min", 0.9))
-                    # Feed the verified best self-solution as the env action; env.step
-                    # will verify it and decide whether to gated-update.
-                    raw = st["code"] if st["found"] else (st["code"] or "")
-                    # when nothing was found, still step with empty answer to signal failure
-                    if not raw.strip():
-                        raw = ""
+                task = env._task()
+                st = None
+                meta_extra: Dict[str, Any] = {}
+                if is_sccl:
+                    # ---- SCCL: gold-free self-certification (spec only) ----
+                    # The certifier sees ONLY task.prompt (+ domain); entry names
+                    # are self-derived unless configured otherwise. Gold test_code /
+                    # reference_answer are never passed into this path.
+                    cert_entry = None if getattr(cfg, "sccl_derive_entry", True) else task.entry_point
+                    cr = certifier.certify(engine, verifier, task.prompt, task.domain,
+                                           entry=cert_entry)
+                    raw = cr.code or ""
                     gold_ref = ""
+                    meta_extra["sccl"] = cr.to_dict()
+                    sccl_stats["steps"] += 1
+                    sccl_stats["certified"] += int(cr.found)
+                    sccl_stats["cert_conf_sum"] += float(cr.confidence)
                 else:
-                    raw = engine.generate(prompt, adapter_on=True)
-                    gold_ref = _task_reference_for_obs(env, obs)
+                    # VSR: retrieval-grounded generation (forward transfer). Controls:
+                    # unchanged learner prompt. Gold reference is metadata only.
+                    prompt = env.build_prompt() if vault is not None else learner.act_prompt(obs)
+                    # Self-taught (no-gold) learners run pass@K + self-repair instead of a
+                    # single generation; they learn only from execution reward.
+                    is_self_taught = name in set(getattr(cfg, "self_taught_learners", ["vsr_nogold", "vsr_self"]))
+                    if is_self_taught:
+                        from .selftaught import self_taught_solve
+                        st = self_taught_solve(engine, verifier, task,
+                                               k_samples=getattr(cfg, "self_taught_k", 4),
+                                               temp=getattr(cfg, "self_taught_temp", 0.7),
+                                               repair_rounds=getattr(cfg, "self_taught_repair_rounds", 1),
+                                               repair_k=getattr(cfg, "self_taught_repair_k", 2),
+                                               commit_min=getattr(cfg, "vault_commit_min", 0.9))
+                        # Feed the verified best self-solution as the env action; env.step
+                        # will verify it and decide whether to gated-update.
+                        raw = st["code"] if st["found"] else (st["code"] or "")
+                        # when nothing was found, still step with empty answer to signal failure
+                        if not raw.strip():
+                            raw = ""
+                        gold_ref = ""
+                    else:
+                        raw = engine.generate(prompt, adapter_on=True)
+                        gold_ref = _task_reference_for_obs(env, obs)
+                    if name == "execfilter":
+                        # gold-free trainability: does the self-output EXECUTE cleanly?
+                        if task.domain == "code":
+                            code_chk = extract_code(raw)
+                            res_chk = verifier.sandbox.execute(code_chk, test_code="")
+                            meta_extra["trainable"] = bool(
+                                res_chk.exit_code == 0 and not res_chk.error_type)
+                        else:
+                            meta_extra["trainable"] = bool((raw or "").strip())
                 op = learner.decide(obs, None, False)
                 obs2, reward, done, info = env.step(Action(
                     answer=raw, learn_op=op,
                     metadata={"reference_answer": gold_ref, "vault_enabled": bool(vault is not None),
-                              "self_taught": {"found": (st["found"] if is_self_taught else None)}}))
+                              "self_taught": {"found": (st["found"] if st else None)},
+                              **meta_extra}))
                 if isinstance(learner, ControllerLearner):
                     learner.learn(reward)
                 rewards.append(reward)
@@ -176,6 +229,16 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                 if vsr:
                     recall_probe_total += int(vsr.get("n_retrieved", 0) > 0)
                     recall_hits += int(bool(vsr.get("recall_hit", False)))
+                if is_sccl:
+                    gate = ui.get("gate") or {}
+                    if gate.get("method") == "sccl_rrv" and ui.get("executed"):
+                        sccl_stats["rrv_updates"] += 1
+                        sccl_stats["rrv_vetoes"] += int(not ui.get("accepted", True))
+                    gt = gate.get("gold_telemetry")
+                    if isinstance(gt, dict):
+                        sccl_stats["gold_probes"] += 1
+                        # agreement: gold gate verdict vs the gold-free decision taken
+                        sccl_stats["gold_agree"] += int(bool(gt.get("gold_gate_ok")) == bool(ui.get("accepted", True)))
                 if ui.get("op") == "update_lora" and ui.get("accepted"):
                     updates += 1
                 if ui.get("op") == "update_lora" and ui.get("executed") and not ui.get("accepted", True):
@@ -236,6 +299,10 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
             "vsr": {"enabled": vault is not None, "recall_rate": round(recall_rate, 4),
                     "recall_hits": recall_hits, "recall_probes": recall_probe_total,
                     "vault_size": (len(vault) if vault is not None else 0)},
+            "sccl": {**sccl_stats,
+                     "cert_rate": round(sccl_stats["certified"] / max(1, sccl_stats["steps"]), 4),
+                     "mean_conf": round(sccl_stats["cert_conf_sum"] / max(1, sccl_stats["steps"]), 4),
+                     "gold_agreement": round(sccl_stats["gold_agree"] / max(1, sccl_stats["gold_probes"]), 4)},
             "adapter_history": engine.registry.history()[:5] + (["..."] if len(engine.registry.history()) > 5 else []),
         }
         # ---- INCREMENTAL CHECKPOINT (survives Kaggle/Lightning 12h kill) ----

@@ -36,6 +36,9 @@ class ExecutionResult:
     error_type: Optional[str] = None
     error_message: Optional[str] = None
     safety_violation: bool = False
+    # per-assert outcomes aligned with assert-line order (self-certification needs
+    # verdict vectors, not just the aggregate pass rate)
+    test_results: List[bool] = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
@@ -74,10 +77,12 @@ def main():
                 res["error_type"] = type(e).__name__; res["error_message"] = str(e)
         else:
             res["tests_total"] = len(lines)
+            res["results"] = []
             for st in lines:
                 try:
-                    exec(st, ns); res["tests_passed"] += 1
+                    exec(st, ns); res["tests_passed"] += 1; res["results"].append(True)
                 except Exception as e:
+                    res["results"].append(False)
                     if not res["error_type"]:
                         res["error_type"] = type(e).__name__; res["error_message"] = f"{st} -> {e}"
             res["pass_rate"] = res["tests_passed"]/max(1,res["tests_total"])
@@ -160,7 +165,8 @@ class PythonSandbox:
                         exit_code=r.get("exit_code", proc.returncode), success=r.get("success", False),
                         tests_passed=r.get("tests_passed",0), tests_total=r.get("tests_total",0),
                         pass_rate=r.get("pass_rate",0.0), execution_time=elapsed,
-                        error_type=r.get("error_type"), error_message=r.get("error_message"))
+                        error_type=r.get("error_type"), error_message=r.get("error_message"),
+                        test_results=[bool(x) for x in r.get("results", [])])
                 except Exception as e:
                     return ExecutionResult(stdout=proc.stdout or "", stderr=f"parse:{e}", exit_code=1,
                                            success=False, tests_total=1, pass_rate=0.0, execution_time=elapsed,

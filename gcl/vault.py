@@ -79,12 +79,16 @@ def _make_embedder(dim: int = 384):
 # ----------------------------- store ----------------------------------------
 class _Skill:
     __slots__ = ("task_id", "family", "prompt", "code", "test_code", "pass_rate",
-                 "reward", "emb", "ts")
+                 "reward", "emb", "ts", "domain", "spec")
 
-    def __init__(self, task_id, family, prompt, code, test_code, pass_rate, reward, emb, ts):
+    def __init__(self, task_id, family, prompt, code, test_code, pass_rate, reward,
+                 emb, ts, domain: str = "code", spec: str = ""):
         self.task_id = task_id; self.family = family; self.prompt = prompt
         self.code = code; self.test_code = test_code; self.pass_rate = pass_rate
         self.reward = reward; self.emb = emb; self.ts = ts
+        # `prompt` is the REGENERATION prompt (what the model is trained on);
+        # `spec` is the raw task specification used for retrieval embeddings.
+        self.domain = domain; self.spec = spec or prompt
 
 
 class SkillVault:
@@ -148,7 +152,7 @@ class SkillVault:
                    prompt=getattr(task, "prompt", ""), code=code,
                    test_code=getattr(task, "test_code", ""), pass_rate=float(pass_rate),
                    reward=float(reward), emb=self._embed(getattr(task, "prompt", "") + "\n" + code),
-                   ts=time.time())
+                   ts=time.time(), domain="code", spec=getattr(task, "prompt", ""))
         self._skills.append(s); self._embs.append(s.emb)
         self._save()
         return True
@@ -317,7 +321,8 @@ class SkillVault:
                 self._skills.append(_Skill(r["task_id"], r.get("family", ""), r.get("prompt", ""),
                                            r.get("code", ""), r.get("test_code", ""),
                                            float(r.get("pass_rate", 0.0)), float(r.get("reward", 0.0)),
-                                           emb, float(r.get("ts", 0.0))))
+                                           emb, float(r.get("ts", 0.0)),
+                                           domain=r.get("domain", "code"), spec=r.get("spec", r.get("prompt", ""))))
                 self._embs.append(self._skills[-1].emb)
         except Exception:
             pass
@@ -326,7 +331,8 @@ class SkillVault:
 def _safe_skill_dict(s: _Skill) -> Dict[str, Any]:
     return {"task_id": s.task_id, "family": s.family, "prompt": s.prompt,
             "code": s.code, "test_code": s.test_code, "pass_rate": s.pass_rate,
-            "reward": s.reward, "ts": s.ts}
+            "reward": s.reward, "ts": s.ts,
+            "domain": getattr(s, "domain", "code"), "spec": getattr(s, "spec", s.prompt)}
 
 
 def _entry_point(code_or_test: str) -> str:
@@ -336,3 +342,118 @@ def _entry_point(code_or_test: str) -> str:
         return m.group(1)
     m = re.search(r"assert\s+([A-Za-z_]\w*)\s*\(", code_or_test or "")
     return m.group(1) if m else ""
+
+
+# ----------------------------- SCCL store ------------------------------------
+class SelfCertVault(SkillVault):
+    """Vault of SELF-CERTIFIED skills for gold-free continual learning.
+
+    Every admitted skill carries the model's OWN self-generated, self-executed
+    test suite (never gold `task.test_code`). The safety gate is the
+    Self-Replay Veto (RRV): after a candidate gradient update, each previously
+    certified skill is REGENERATED under the updated adapter and re-run against
+    ITS OWN stored self-tests; any regression vetoes/rolls back the update.
+    """
+
+    def _too_similar_spec_exists(self, spec: str, min_sim: float = 0.995) -> bool:
+        if len(self._skills) < 1:
+            return False
+        q = self._embed(spec)
+        if q is None:
+            return False
+        return any(self._cosine(s.emb, q) >= min_sim for s in self._skills)
+
+    def commit_certified(self, task_id: str, family: str, spec: str, prompt: str,
+                         code: str, self_tests: List[str], conf: float,
+                         domain: str = "code", entry: str = "",
+                         dedup_sim: float = 0.0) -> bool:
+        """Admit a self-certified skill (spec-only provenance, no gold)."""
+        code = (code or "").strip()
+        if not code:
+            return False
+        if domain == "code" and not (self_tests or []):
+            return False
+        if dedup_sim > 0.0 and self._too_similar_spec_exists(spec, min_sim=dedup_sim):
+            return False
+        import time
+        s = _Skill(task_id=task_id, family=family, prompt=prompt, code=code,
+                   test_code="\n".join(self_tests or []), pass_rate=float(conf),
+                   reward=float(conf), emb=self._embed(spec + "\n" + code),
+                   ts=time.time(), domain=domain, spec=spec)
+        self._skills.append(s); self._embs.append(s.emb)
+        self._save()
+        return True
+
+    def to_pairs(self) -> List[Dict[str, str]]:
+        """Replay pairs keyed on the stored regeneration prompt (code + math)."""
+        out = []
+        for s in self._skills:
+            if not s.code:
+                continue
+            if getattr(s, "domain", "code") == "math":
+                out.append({"prompt": s.prompt, "target": " " + s.code})
+            else:
+                out.append({"prompt": s.prompt, "target": s.code})
+        return out
+
+    def _any_passes(self, codes: List[str], tests: List[str], verifier: Any) -> bool:
+        joined = "\n".join(tests)
+        for c in codes:
+            if not (c or "").strip():
+                continue
+            try:
+                _, info, _ = verifier.reward(domain="code", code=c, test_code=joined)
+                if float(info.get("pass_rate", 0.0)) >= 1.0 and bool(info.get("success", False)):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def selfreplay_veto(self, engine: Any, verifier: Any, *,
+                        check_skills: int = 3, n_samples: int = 2,
+                        sample_temp: float = 0.7) -> Dict[str, Any]:
+        """Self-Replay Veto (RRV) — the gold-free forgetting detector.
+
+        For each recently committed self-certified skill, REGENERATE solutions
+        from the stored prompt under the UPDATED adapter and re-run them against
+        the skill's OWN stored self-tests. A skill is RETAINED iff some
+        regeneration passes all its self-tests. If any skill regresses, the
+        candidate weight update is vetoed (rolled back by the caller).
+
+        Note we deliberately do NOT fall back to executing the stored code: that
+        artifact trivially passes its own tests regardless of the model's state,
+        so it would never veto and would make the gate vacuous. RRV must measure
+        the *model's current ability to re-express* each skill — that is exactly
+        catastrophic forgetting, measured without any gold.
+        """
+        from .engine import extract_code
+
+        broke: List[str] = []
+        skipped: List[str] = []
+        checked = 0
+
+        pool = list(self._skills)[-check_skills:] if check_skills > 0 else []
+        for s in reversed(pool):
+            if getattr(s, "domain", "code") != "code" or not (s.test_code or "").strip():
+                skipped.append(s.task_id)
+                continue
+            tests = [l.strip() for l in s.test_code.splitlines()
+                     if l.strip().startswith("assert")]
+            if not tests:
+                skipped.append(s.task_id)
+                continue
+            checked += 1
+            try:
+                regen = engine.sample_candidates(s.prompt, n=max(1, n_samples),
+                                                 temperature=sample_temp)
+                codes = [extract_code(r) for r in regen]
+                codes = [c for c in codes if (c or "").strip()]
+            except Exception:
+                codes = []
+            if not self._any_passes(codes, tests, verifier):
+                broke.append(s.task_id)
+
+        return {"veto": bool(broke),
+                "reason": ("rrv_regress:" + ",".join(broke)) if broke else "ok",
+                "checked": checked, "broke": broke, "skipped": skipped,
+                "n_skills": len(self._skills)}

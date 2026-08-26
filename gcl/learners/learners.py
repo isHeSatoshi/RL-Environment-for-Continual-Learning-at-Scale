@@ -212,7 +212,55 @@ class GRPOLearner(ContinualLearner):
 
 # alias so ablation scripts can refer to "vsr_nogold" explicitly
 VSRNoGold = VSRSelfLearner
+
+
+class SelfDistillLearner(ContinualLearner):
+    """L0 baseline: classic self-distillation. Trains on ANY non-empty self-output
+    with no verification and no safety gate — the standard recipe SCCL must beat."""
+    name = "selfdistill"
+    def decide(self, obs, reward, success):
+        return LearnOp.UPDATE_LORA
+
+
+class ExecFilterLearner(ContinualLearner):
+    """L1 baseline: train on self-output only if it EXECUTES cleanly (compiles +
+    runs without error). Execution filtering, but still no correctness signal and
+    no safety gate."""
+    name = "execfilter"
+    def decide(self, obs, reward, success):
+        return LearnOp.UPDATE_LORA
+
+
+class SCCLLearner(ContinualLearner):
+    """Self-Certified Continual Learning — the gold-free contribution.
+
+    Certification runs per step in experiment.py (SelfCertifier): the model
+    generates its OWN assert-suite from the spec alone, scores a diverse
+    candidate pool against it, and certifies a target by consensus. This learner
+    simply always requests an update; the env trains only when a certified target
+    exists (confidence >= tau) and the Self-Replay Veto accepts the update.
+    No gold test, reference, or holdout touches any decision.
+    """
+    name = "sccl"
+    def decide(self, obs, reward, success):
+        return LearnOp.UPDATE_LORA
+
+
+class SCCLNoGateLearner(SCCLLearner):
+    """Ablation: SCCL certification WITHOUT the Self-Replay Veto (no safety gate).
+    Isolates how much of SCCL's stability comes from the gate itself."""
+    name = "sccl_nogate"
+
+
+class SCCLNoConsLearner(SCCLLearner):
+    """Ablation: SCCL without cross-bag consensus weighting (raw discriminative
+    pass rate). Isolates the contribution of test-bag consensus."""
+    name = "sccl_nocons"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
-                                 VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner)}
+                                 VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
+                                 SelfDistillLearner, ExecFilterLearner,
+                                 SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

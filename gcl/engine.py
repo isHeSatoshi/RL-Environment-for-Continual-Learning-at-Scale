@@ -88,7 +88,11 @@ class TrainingEngine:
     """Owns ONE base + ONE peft adapter. Real gradients (I1). Single-GPU safe."""
 
     def __init__(self, cfg, adapter_root: Optional[str] = None, device: Optional[str] = None):
-        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForMultimodalLM, AutoTokenizer
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+        try:  # only newer transformers expose the multimodal auto class
+            from transformers import AutoModelForMultimodalLM
+        except ImportError:
+            AutoModelForMultimodalLM = None
 
         from peft import LoraConfig, get_peft_model
         self.cfg = cfg
@@ -111,8 +115,11 @@ class TrainingEngine:
         dtype = getattr(torch, cfg.dtype, torch.bfloat16) if self.device == "cuda" else torch.float32
         # Qwen3.5-2B is a multimodal checkpoint (model_type=qwen3_5), not a
         # CausalLM checkpoint. Its text path accepts input_ids for this
-        # code-only continual-learning workload.
-        model_class = AutoModelForMultimodalLM if model_config.model_type == "qwen3_5" else AutoModelForCausalLM
+        # code-only continual-learning workload. When the installed transformers
+        # lacks the multimodal auto class (or a CausalLM arch), fall back safely.
+        model_class = AutoModelForCausalLM
+        if model_config.model_type == "qwen3_5" and AutoModelForMultimodalLM is not None:
+            model_class = AutoModelForMultimodalLM
         if self.device == "cuda" and torch.cuda.device_count() > 1:
             base = model_class.from_pretrained(cfg.model_name, torch_dtype=dtype, device_map="auto", trust_remote_code=True)
         else:
@@ -421,6 +428,13 @@ def extract_code(text: str) -> str:
     if matches:
         tail = text[matches[-1].start():]
         tail = re.split(r"\n\s*```", tail, maxsplit=1)[0]  # stop at a trailing fence
+        # keep top-level imports that precede the def block, otherwise the
+        # extracted snippet NameErrors at runtime (e.g. math.sqrt w/o import)
+        head = text[:matches[-1].start()]
+        imports = [ln.rstrip() for ln in head.splitlines()
+                   if re.match(r"^\s*(import\s+[A-Za-z_]|from\s+[\w.]+\s+import\s)", ln)]
+        if imports:
+            tail = "\n".join(imports) + "\n" + tail
         return tail.strip()
     # no compilable code found (think/prose only) — return empty so verifier scores 0
     return ""

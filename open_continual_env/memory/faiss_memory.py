@@ -232,9 +232,16 @@ class LegacyExperienceStoreWrapper(SemanticMemory):
         top_k: int = 5
     ) -> List[Trajectory]:
         if hasattr(self.store, "query"):
-            return self.store.query(prompt, top_k)
+            try:
+                return self.store.query(prompt, top_k)
+            except TypeError:
+                # Legacy predicate-style query (ExperienceStore.query(filter_fn))
+                # cannot serve semantic lookup; degrade to recency below.
+                pass
         if hasattr(self.store, "get_recent"):
             return self.store.get_recent(top_k)
+        if hasattr(self.store, "get_all"):
+            return self.store.get_all()[-top_k:]
         if isinstance(self.store, list):
             return self.store[-top_k:]
         return []
