@@ -287,11 +287,21 @@ class SCCLProbePromoteLearner(SCCLLearner):
     name = "sccl_promote"
 
 
+class SCCLNbhdLearner(SCCLLearner):
+    """SCCL v3 — neighborhood certification at ADMISSION. A point-cert may
+    train only if it is also consistent on a self-generated spec variant
+    (paraphrase for code / numeric variant for math), so instance-narrow
+    solutions are filtered out before they touch the adapter. This targets
+    generalization forgetting at the source rather than vetoing it at the gate
+    after the fact. Wired via cfg.sccl_nbhd_learners; still fully gold-free."""
+    name = "sccl_n"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
                                  SelfDistillLearner, ExecFilterLearner,
                                  SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner,
                                  SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner,
-                                 SCCLProbePromoteLearner)}
+                                 SCCLProbePromoteLearner, SCCLNbhdLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

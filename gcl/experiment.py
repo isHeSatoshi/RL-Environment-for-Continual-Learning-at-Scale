@@ -136,7 +136,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     set(getattr(cfg, "sccl_nogate_learners", [])) |
                     set(getattr(cfg, "sccl_nocons_learners", [])) |
                     set(getattr(cfg, "sccl_replay_learners", [])) |
-                    set(getattr(cfg, "sccl_probe_learners", [])))
+                    set(getattr(cfg, "sccl_probe_learners", [])) |
+                    set(getattr(cfg, "sccl_nbhd_learners", [])))
         is_sccl = name in sccl_set
         certifier = None
         if is_sccl:
@@ -149,7 +150,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                 tests_per_bag=getattr(cfg, "sccl_tests_per_bag", 4),
                 tau=getattr(cfg, "sccl_tau", 0.65),
                 tau_math=getattr(cfg, "sccl_tau_math", 0.6),
-                consensus=name not in set(getattr(cfg, "sccl_nocons_learners", [])))
+                consensus=name not in set(getattr(cfg, "sccl_nocons_learners", [])),
+                nbhd_tests=getattr(cfg, "sccl_nbhd_tests", 3))
             print(f"[GCL] [{name}] SelfCert Vault enabled (gold-free RRV gate, "
                   f"tau={certifier.tau}, consensus={certifier.consensus}) -> {vault.directory}", flush=True)
         elif name in vsr_set or name in ref_set:
@@ -189,7 +191,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         recall_hits = recall_probe_total = 0
         sccl_stats = {"steps": 0, "certified": 0, "rrv_updates": 0, "rrv_vetoes": 0,
                       "gold_probes": 0, "gold_agree": 0, "cert_conf_sum": 0.0,
-                      "probes_made": 0, "probes_committed": 0, "probes_promoted": 0}
+                      "probes_made": 0, "probes_committed": 0, "probes_promoted": 0,
+                      "nbhd_checked": 0, "nbhd_rejected": 0}
         t0 = time.time()
         obs = env.reset()
         last_family_seen = 0
@@ -209,9 +212,30 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     cert_entry = None if getattr(cfg, "sccl_derive_entry", True) else task.entry_point
                     cr = certifier.certify(engine, verifier, task.prompt, task.domain,
                                            entry=cert_entry)
+                    # ---- SCCL v3: NEIGHBORHOOD certification at admission ----
+                    # Spec-only check (check_neighborhood sees spec/domain/cert,
+                    # never a Task or gold field). A point-cert that is shown to
+                    # be instance-narrow is demoted BEFORE it can train, commit,
+                    # or arm a probe — targeting generalization damage at the
+                    # source instead of vetoing it at the gate after the fact.
+                    nbhd = None
+                    if cr.found and name in set(getattr(cfg, "sccl_nbhd_learners", [])):
+                        try:
+                            nbhd = certifier.check_neighborhood(engine, verifier,
+                                                                task.prompt,
+                                                                task.domain, cr)
+                        except Exception:
+                            nbhd = {"robust": True, "reason": "nbhd_error_open"}
+                        if nbhd is not None and not nbhd.get("robust", True):
+                            cr.found = False  # demote: not trainable/committable
+                            cr.diagnostics["nbhd"] = nbhd.get("reason", "fragile")
                     raw = cr.code or ""
                     gold_ref = ""
                     meta_extra["sccl"] = cr.to_dict()
+                    if nbhd is not None:
+                        meta_extra["sccl_nbhd"] = nbhd
+                        sccl_stats["nbhd_checked"] += 1
+                        sccl_stats["nbhd_rejected"] += int(not nbhd.get("robust", True))
                     sccl_stats["steps"] += 1
                     sccl_stats["certified"] += int(cr.found)
                     sccl_stats["cert_conf_sum"] += float(cr.confidence)

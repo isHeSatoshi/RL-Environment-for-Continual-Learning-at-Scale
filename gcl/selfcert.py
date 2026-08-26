@@ -229,7 +229,7 @@ class SelfCertifier:
                  tests_per_bag: int = 4, tau: float = 0.65, tau_math: float = 0.6,
                  max_tests: int = 8, weak_cap: float = 0.5,
                  margin_bonus: float = 0.05, margin_min: float = 0.15,
-                 consensus: bool = True):
+                 consensus: bool = True, nbhd_tests: int = 3):
         self.k = max(2, int(k))
         self.temp = float(temp)
         self.test_bags = max(1, int(test_bags))
@@ -241,6 +241,7 @@ class SelfCertifier:
         self.margin_bonus = float(margin_bonus)
         self.margin_min = float(margin_min)
         self.consensus = bool(consensus)  # ablation: sccl_nocons
+        self.nbhd_tests = max(2, int(nbhd_tests))
 
     # ---- entry-name derivation (spec only) ---------------------------------
     def propose_entry(self, engine, spec: str) -> str:
@@ -497,3 +498,67 @@ class SelfCertifier:
                 "prompt": cr.prompt, "code": cr.code,
                 "self_tests": list(cr.self_tests), "entry": entry,
                 "confidence": cr.confidence}
+
+    # ---- neighborhood certification (SCCL v3, spec only) ---------------------
+    def check_neighborhood(self, engine, verifier, spec: str, domain: str,
+                           base: CertResult) -> Dict[str, Any]:
+        """Admission-time generalization filter: certify the NEIGHBORHOOD, not
+        just the point.
+
+        v1/v2 evidence shows gold-free forgetting is dominated by loss of
+        GENERALIZATION to unseen instances, while trained instances stay
+        retained. Probes police that damage after the fact at the gate, at a
+        plasticity cost. This filter instead acts at ADMISSION: a certified
+        candidate may train the adapter only if it is also consistent on a
+        self-generated spec variant — i.e. the skill is not instance-narrow.
+
+        code : paraphrase the spec, write fresh self-tests for the paraphrase,
+               require the base winner to pass them all.
+        math : sample a numeric variant (different numbers, same method) and
+               require the model to remain self-consistent (majority vote) on
+               it — evidence the METHOD, not the memorized answer, is held.
+
+        Failure policy — evidence-based admission:
+          * variant/tests cannot be manufactured  -> ADMIT (open): the
+            neighborhood question is unanswerable; do not punish the cert.
+          * manufactured evidence shows fragility -> REJECT (closed): the
+            winner fails its own spec-variant's tests / the variant cannot be
+            self-solved consistently.
+
+        Gold-free by construction: inputs are (spec, domain, base CertResult);
+        no Task object or gold field is reachable from this path.
+        """
+        if domain == "math":
+            variant = engine.generate(_MATH_VARIANT_PROMPT.format(spec=spec),
+                                      adapter_on=True, greedy=False)
+            variant = (variant or "").strip()
+            if len(variant) < 20:
+                return {"robust": True, "reason": "variant_generation_failed_open"}
+            cr2 = self.certify_math(engine, variant)
+            if cr2.found:
+                return {"robust": True, "reason": "", "variant": variant,
+                        "variant_conf": float(cr2.confidence)}
+            return {"robust": False, "reason": "variant_not_certified",
+                    "variant": variant, "variant_conf": float(cr2.confidence)}
+
+        para = engine.generate(_PARAPHRASE_PROMPT.format(spec=spec),
+                               adapter_on=True, greedy=False)
+        para = (para or "").strip()
+        if len(para) < 20 or " ".join(para.split()) == " ".join((spec or "").split()):
+            return {"robust": True, "reason": "variant_generation_failed_open"}
+        entry = base.entry or ""
+        if entry and f"named `{entry}`" not in para:
+            para = para + f" The function must be named `{entry}`."
+        txt = engine.generate(_TESTGEN_PROMPT.format(spec=para, entry=entry,
+                                                     n=self.nbhd_tests, variant=""),
+                              adapter_on=True, greedy=True)
+        tests = parse_asserts(txt, entry, max_tests=self.max_tests)
+        if not tests:
+            return {"robust": True, "reason": "variant_no_tests_open",
+                    "variant": para}
+        ok = self._passes_tests(verifier, base.code, tests)
+        if ok:
+            return {"robust": True, "reason": "", "variant": para,
+                    "n_tests": len(tests)}
+        return {"robust": False, "reason": "winner_fails_variant",
+                "variant": para, "n_tests": len(tests)}

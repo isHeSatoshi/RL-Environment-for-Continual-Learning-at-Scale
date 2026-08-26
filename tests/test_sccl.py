@@ -48,7 +48,8 @@ def test_certifier_api_is_spec_only():
     import inspect
     for fn in (SelfCertifier.certify, SelfCertifier.certify_code,
                SelfCertifier.certify_math, SelfCertifier.propose_entry,
-               SelfCertifier.generate_test_bags, SelfCertifier.make_probe):
+               SelfCertifier.generate_test_bags, SelfCertifier.make_probe,
+               SelfCertifier.check_neighborhood):
         params = list(inspect.signature(fn).parameters)
         assert "task" not in params, f"{fn.__name__} accepts a task -> gold leak risk"
 
@@ -782,7 +783,7 @@ def test_sccl_probe_learner_rrv_vetoes_on_probe_regression():
 
 def test_learner_registry_has_v2_names():
     from gcl.learners.learners import LEARNERS, SCCLLearner
-    for n in ("sccl_replay", "sccl_probe", "sccl_v2", "sccl_promote"):
+    for n in ("sccl_replay", "sccl_probe", "sccl_v2", "sccl_promote", "sccl_n"):
         assert n in LEARNERS, f"{n} missing from LEARNERS registry"
         assert issubclass(LEARNERS[n], SCCLLearner)
 
@@ -913,3 +914,102 @@ def test_env_no_promotion_on_vetoed_update():
     assert "probes_promoted" not in ui["gate"]
     probe = next(s for s in vault._skills if s.task_id == "t0:p")
     assert probe.kind == "probe"
+
+
+# ---------------------------------------------------------------------------
+# 8) SCCL v3 — NEIGHBORHOOD certification at admission (gold-free)
+# ---------------------------------------------------------------------------
+
+def test_nbhd_code_robust_when_winner_passes_variant_tests():
+    """A winner that also passes fresh self-tests written for a paraphrased
+    spec variant is neighborhood-consistent -> admitted."""
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng, ver = _ProbeEngine(), Verifier(sandbox=PythonSandbox())
+    res = sc.check_neighborhood(eng, ver,
+                                "Return the sum of two integers a and b.",
+                                "code", _base_cert())
+    assert res["robust"] is True, res
+    assert res["reason"] == ""
+    assert "named `add2`" in res["variant"], "interface hint must ride along"
+    assert res["variant"] != "Return the sum of two integers a and b."
+
+
+def test_nbhd_code_rejects_instance_narrow_winner():
+    """A winner that only solves the exact instance (fails the variant suite)
+    is instance-narrow -> REJECTED at admission (evidence-based, closed)."""
+    sc = SelfCertifier(k=3, temp=0.8, test_bags=2, tests_per_bag=2, tau=0.65)
+    eng, ver = _ProbeEngine(), Verifier(sandbox=PythonSandbox())
+    narrow = CertResult(found=True, code="def add2(a, b):\n    return 0",
+                        confidence=0.9, domain="code", entry="add2",
+                        self_tests=["assert add2(0, 0) == 0"], prompt="p")
+    res = sc.check_neighborhood(eng, ver,
+                                "Return the sum of two integers a and b.",
+                                "code", narrow)
+    assert res["robust"] is False, res
+    assert res["reason"] == "winner_fails_variant"
+
+
+def test_nbhd_code_open_when_paraphrase_unavailable():
+    """If the variant cannot be manufactured, the neighborhood question is
+    unanswerable -> ADMIT (open), do not punish the cert."""
+    sc = SelfCertifier(k=3, tau=0.65)
+    eng = _ProbeEngine(paraphrase="too short")   # < 20 chars
+    ver = Verifier(sandbox=PythonSandbox())
+    res = sc.check_neighborhood(eng, ver,
+                                "Return the sum of two integers a and b.",
+                                "code", _base_cert())
+    assert res["robust"] is True
+    assert res["reason"] == "variant_generation_failed_open"
+
+
+def test_nbhd_code_open_when_no_variant_tests():
+    sc = SelfCertifier(k=3, tau=0.65)
+    eng = _ProbeEngine()
+    eng.test_bags = [["no asserts here at all"]]  # parse_asserts -> []
+    ver = Verifier(sandbox=PythonSandbox())
+    res = sc.check_neighborhood(eng, ver,
+                                "Return the sum of two integers a and b.",
+                                "code", _base_cert())
+    assert res["robust"] is True
+    assert res["reason"] == "variant_no_tests_open"
+
+
+def test_nbhd_math_robust_when_variant_self_consistent():
+    """math: the model must remain self-consistent (majority vote) on a numeric
+    variant — evidence the METHOD, not the memorized answer, is held."""
+    sc = SelfCertifier(k=6, tau_math=0.6)
+    eng = _ProbeEngine()
+    res = sc.check_neighborhood(eng, Verifier(sandbox=PythonSandbox()),
+                                "What is 6 times 7?", "math",
+                                CertResult(found=True, code="42", domain="math"))
+    assert res["robust"] is True, res
+    assert res["reason"] == ""
+    assert "7 times 8" in res["variant"]
+
+
+def test_nbhd_math_rejects_inconsistent_variant():
+    sc = SelfCertifier(k=6, tau_math=0.99)   # impossible threshold
+    eng = _ProbeEngine()
+    res = sc.check_neighborhood(eng, Verifier(sandbox=PythonSandbox()),
+                                "What is 6 times 7?", "math",
+                                CertResult(found=True, code="42", domain="math"))
+    assert res["robust"] is False
+    assert res["reason"] == "variant_not_certified"
+
+
+def test_nbhd_math_open_when_variant_generation_fails():
+    sc = SelfCertifier(k=6, tau_math=0.6)
+    eng = _ProbeEngine(math_variant="short")
+    res = sc.check_neighborhood(eng, Verifier(sandbox=PythonSandbox()),
+                                "What is 6 times 7?", "math",
+                                CertResult(found=True, code="42", domain="math"))
+    assert res["robust"] is True
+    assert res["reason"] == "variant_generation_failed_open"
+
+
+def test_nbhd_config_fields_parse():
+    cfg = ExperimentConfig()
+    assert cfg.sccl_nbhd_learners == []
+    assert cfg.sccl_nbhd_tests == 3
+    cfg.sccl_nbhd_learners = ["sccl_n"]
+    assert cfg.sccl_nbhd_learners == ["sccl_n"]

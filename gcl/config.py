@@ -83,6 +83,12 @@ class ExperimentConfig:
     sccl_probe_promote_learners: List[str] = field(default_factory=list)
     sccl_probe_promote_age: int = 0     # RRV probe-checks survived before a probe
                                         # graduates to a certified rehearsal pair
+    # ---- SCCL v3: neighborhood certification (admission-time, gold-free) ----
+    sccl_nbhd_learners: List[str] = field(default_factory=list)  # a cert may train
+                                        # only if it is also consistent on a
+                                        # self-generated spec variant (paraphrase
+                                        # for code; numeric variant for math)
+    sccl_nbhd_tests: int = 3            # self-tests written for the code variant
     # output
     out_dir: str = "runs/run"
     seed: int = 42

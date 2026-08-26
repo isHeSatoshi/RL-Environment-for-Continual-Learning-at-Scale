@@ -1,5 +1,5 @@
 {
-  "_comment": "DRAFT — launch only after runs/sccl_v2 analysis justifies it. SCCL v3 candidate: PROBE CURRICULUM on top of v2. Hypothesis: residual forgetting (if any after v2) is unvisited-generalization loss; probes are manufactured, certified generalization instances — graduating the ones that survive RRV checks into certified rehearsal pairs trains the model on the generalization neighborhood itself, while fresher probes keep guarding the frontier as untrained checks. Fully gold-free: promotion is vault-internal bookkeeping over entries already certified + re-verified by regeneration. Seeded regime (torch_seed=42) for reproducible certification sampling — the unseeded sccl_v2 rerun showed run-to-run variance (v1 sccl: 0.637 original vs 0.744 rerun), so this ladder includes a SEEDED v1 'sccl' reference row; compare rows WITHIN this ladder. Ladder: frozen < sccl (v1 ref) < sccl_v2 (v2 ref) < sccl_promote (v2 + curriculum) < vsr_nogold (gold-test reference). Same stream/hash as sccl_main & sccl_v2.",
+  "_comment": "SCCL v3 — NEIGHBORHOOD CERTIFICATION AT ADMISSION. Diagnosis from v2: gold-free forgetting is dominated by loss of GENERALIZATION to unseen instances (arith holdout collapses while trained arith stays retained), and v2's gate-side monitoring (rehearsal + probes + math-RRV) cuts forgetting but at a plasticity cost (over-conservative gate: 12 accept / 8 rollback, math under-trained). v3 tests the admission hypothesis: filter instance-narrow solutions BEFORE they train (a point-cert may train only if it is also consistent on a self-generated spec variant), targeting generalization damage at the source instead of vetoing it at the gate after the fact. Ladder (all seeded, torch_seed=42 — compare WITHIN this run): frozen (control) < sccl (v1 point-cert ref) < sccl_n (v1 + neighborhood admission, THE NEW MECHANISM) < sccl_promote (v2 monitoring + probe curriculum ref) < vsr_nogold (gold-test reference). sccl_n is deliberately v1 + ONLY the admission filter (no replay/probe) to isolate the mechanism. Fully gold-free: the variant check is spec-only (paraphrase for code / numeric variant + majority vote for math); gold is final-eval + telemetry only. Same stream/hash as sccl_main & sccl_v2 (554ce43f182b).",
   "stream": {
     "seed": 42,
     "families": [
@@ -27,7 +27,7 @@
     "vault_commit_min": 0.9,
     "vault_retrieve_k": 3,
     "vault_gate_check": 3,
-    "sccl_learners": ["sccl", "sccl_v2", "sccl_promote"],
+    "sccl_learners": ["sccl", "sccl_n", "sccl_promote"],
     "sccl_nogate_learners": [],
     "sccl_nocons_learners": [],
     "sccl_k": 6,
@@ -40,19 +40,21 @@
     "sccl_replay_check": 3,
     "sccl_replay_samples": 2,
     "sccl_gate_probe": 4,
-    "sccl_replay_learners": ["sccl_v2", "sccl_promote"],
+    "sccl_replay_learners": ["sccl_promote"],
     "sccl_replay_k": 2,
-    "sccl_probe_learners": ["sccl_v2", "sccl_promote"],
+    "sccl_probe_learners": ["sccl_promote"],
     "sccl_probes": 1,
     "sccl_probe_check": 2,
     "sccl_rrv_math": 2,
     "sccl_probe_promote_learners": ["sccl_promote"],
     "sccl_probe_promote_age": 2,
+    "sccl_nbhd_learners": ["sccl_n"],
+    "sccl_nbhd_tests": 3,
     "self_taught_learners": ["vsr_nogold"],
     "out_dir": "runs/sccl_v3",
     "seed": 42,
     "torch_seed": 42
   },
-  "learners": ["frozen", "sccl", "sccl_v2", "sccl_promote", "vsr_nogold"],
+  "learners": ["frozen", "sccl", "sccl_n", "sccl_promote", "vsr_nogold"],
   "out_dir": "runs/sccl_v3"
 }
