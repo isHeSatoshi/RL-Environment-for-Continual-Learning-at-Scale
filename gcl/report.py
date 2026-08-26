@@ -89,14 +89,50 @@ def write_results_tex(metrics_path: str, out_tex: str, prefix: str = "") -> Dict
     return {"written": out_tex, "learners": list(learners.keys()), "canary_clean": canary.get("clean", False)}
 
 
+def write_aggregate_tex(agg_path: str, out_tex: str, prefix: str = "") -> Dict[str, Any]:
+    """Registry from a multi-seed aggregate (scripts/run_seeds.py): emits
+    {safe}<metric>mean / {safe}<metric>std macros so the paper can render
+    mean +/- std instead of single-run numbers."""
+    with open(agg_path) as f:
+        agg = json.load(f)
+    summary = agg["summary"]
+    seeds = agg.get("seeds", [])
+    lines = [MACRO_HEADER, f"% seed aggregate: seeds={seeds}", ""]
+    prefix = _safe_name(prefix)
+    for name, row in summary.items():
+        safe = prefix + _safe_name(name)
+        lines.append(f"% --- learner: {name} (n={len(seeds)} seeds) ---")
+        lines.append(_macro(f"{safe}accmean", _fmt(row["acc"]["mean"])))
+        lines.append(_macro(f"{safe}accstd", _fmt(row["acc"]["std"])))
+        lines.append(_macro(f"{safe}bwtmean", _sign(row["bwt"]["mean"])))
+        lines.append(_macro(f"{safe}bwtstd", _fmt(row["bwt"]["std"])))
+        lines.append(_macro(f"{safe}forgetmean", _fmt(row["forgetting"]["mean"])))
+        lines.append(_macro(f"{safe}forgetstd", _fmt(row["forgetting"]["std"])))
+        lines.append(_macro(f"{safe}frontiermean", _sign(row["frontier"]["mean"])))
+        lines.append(_macro(f"{safe}frontierstd", _fmt(row["frontier"]["std"])))
+        lines.append(_macro(f"{safe}updatesmean", _fmt(row["updates"]["mean"], nd=1)))
+        lines.append(_macro(f"{safe}rollbacksmean", _fmt(row["rollbacks"]["mean"], nd=1)))
+        lines.append("")
+    lines.append(_macro(f"{prefix or 'agg'}nseeds", str(len(seeds))))
+    with open(out_tex, "w") as f:
+        f.write("\n".join(lines))
+    return {"written": out_tex, "learners": list(summary.keys()), "seeds": seeds}
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", required=True, help="run dir containing metrics.json")
+    ap.add_argument("--run", help="run dir containing metrics.json")
+    ap.add_argument("--aggregate", help="seed-aggregate dir containing aggregate.json (from scripts/run_seeds.py)")
     ap.add_argument("--out", required=True, help="output .tex file for the paper")
     ap.add_argument("--prefix", default="", help="macro name prefix (e.g. v2) so multiple run registries can coexist")
     args = ap.parse_args()
-    res = write_results_tex(os.path.join(args.run, "metrics.json"), args.out, prefix=args.prefix)
+    if bool(args.run) == bool(args.aggregate):
+        ap.error("provide exactly one of --run / --aggregate")
+    if args.run:
+        res = write_results_tex(os.path.join(args.run, "metrics.json"), args.out, prefix=args.prefix)
+    else:
+        res = write_aggregate_tex(os.path.join(args.aggregate, "aggregate.json"), args.out, prefix=args.prefix)
     print("results.tex written:", json.dumps(res))
 
 
