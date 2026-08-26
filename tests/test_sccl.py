@@ -1064,6 +1064,9 @@ def test_sccl_anchor_engaged_for_listed_learner():
     assert eng.last_update_kw is not None
     assert abs(eng.last_update_kw["anchor_lambda"] - 0.4) < 1e-9, \
         f"anchor must be engaged for listed learner, got {eng.last_update_kw['anchor_lambda']}"
+    # audit trail: the anchor strength must be logged in update_info so a real
+    # run's trajectory can be verified gold-free post hoc
+    assert abs(ui["anchor_lambda"] - 0.4) < 1e-9
 
 
 def test_sccl_anchor_not_engaged_for_unlisted_learner():
