@@ -82,6 +82,12 @@ def print_sccl_stats(m: Dict[str, Any], tag: str) -> None:
             f"probes_made={sc.get('probes_made',0):>2} probes_commit={sc.get('probes_committed',0):>2} "
             f"gold_agree={sc.get('gold_agreement',0.0):.2f}"
         )
+        if sc.get("nbhd_checked", 0):
+            print(
+                f"  {'':<14} nbhd_checked={sc['nbhd_checked']:>3} "
+                f"nbhd_rejected={sc.get('nbhd_rejected',0):>3} "
+                f"(admission-time neighborhood filter, v3)"
+            )
 
 
 def print_failure_detail(m: Dict[str, Any], fam_names: List[str], tag: str) -> None:

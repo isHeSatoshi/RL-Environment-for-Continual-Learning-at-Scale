@@ -45,6 +45,10 @@ def test_online_trainer_queue():
         info = trainer.queue("cluster_algorithms", traj, min_batch_size=1)
         assert info["cluster_id"] == "cluster_algorithms"
         assert info["status"] in ("queued", "submitting")
+        # Drain the async worker before tmpdir teardown: it writes adapter
+        # files into tmpdir, and on Windows rmtree races open handles
+        # (WinError 145) under disk load.
+        trainer.executor.shutdown(wait=True)
 
 
 def test_dpo_learner():
