@@ -782,6 +782,134 @@ def test_sccl_probe_learner_rrv_vetoes_on_probe_regression():
 
 def test_learner_registry_has_v2_names():
     from gcl.learners.learners import LEARNERS, SCCLLearner
-    for n in ("sccl_replay", "sccl_probe", "sccl_v2"):
+    for n in ("sccl_replay", "sccl_probe", "sccl_v2", "sccl_promote"):
         assert n in LEARNERS, f"{n} missing from LEARNERS registry"
         assert issubclass(LEARNERS[n], SCCLLearner)
+
+
+# ---------------------------------------------------------------------------
+# 7) Probe curriculum (v3 candidate): probes that survive RRV checks graduate
+#    to certified rehearsal pairs. Still fully gold-free.
+# ---------------------------------------------------------------------------
+
+def test_rrv_probe_check_increments_probe_checks():
+    """A passing probe check bumps probe_checks; a regressing probe's counter
+    stays put (it goes to broke_probes instead)."""
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_probe("t1:p", "f", "Paraphrase.", "PROMPT p\n```python\n",
+                   _CERT_CODE, _CERT_TESTS, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a + b\n```"
+    v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2, check_probes=1)
+    assert v._skills[-1].probe_checks == 1
+    v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2, check_probes=1)
+    assert v._skills[-1].probe_checks == 2
+    eng.regen_code = "```python\ndef add2(a, b):\n    return 0\n```"  # regress
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2, check_probes=1)
+    assert res["veto"] and "t1:p" in res["broke_probes"]
+    assert v._skills[-1].probe_checks == 2, "regressing check must not count"
+
+
+def test_promote_probes_graduates_to_skill():
+    """promote_probes flips eligible probes to skills, reports the count, and
+    the graduate then falls under RRV's SKILL check (not the probe check)."""
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_certified("t1", "f", "Return the sum.", "PROMPT s\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    v.commit_probe("t1:p", "f", "Paraphrase.", "PROMPT p\n```python\n",
+                   _CERT_CODE, _CERT_TESTS, 0.9)
+    v._skills[-1].probe_checks = 2
+    n = v.promote_probes(min_checks=2)
+    assert n == 1
+    kinds = {s.task_id: s.kind for s in v._skills}
+    assert kinds == {"t1": "skill", "t1:p": "skill"}
+    # second call is a no-op: nothing left to promote
+    assert v.promote_probes(min_checks=2) == 0
+    # the graduate is now reachable by the v1 skill protocol
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a + b\n```"
+    res = v.selfreplay_veto(eng, ver, check_skills=5, n_samples=2, check_probes=2)
+    assert res["checked"] == 2 and res["checked_probes"] == 0
+
+
+def test_promote_probes_respects_age_threshold():
+    v = SelfCertVault()
+    v.commit_probe("p1", "f", "s", "p\n```python\n", _CERT_CODE, _CERT_TESTS, 0.9)
+    v.commit_probe("p2", "f", "s", "p\n```python\n", _CERT_CODE, _CERT_TESTS, 0.9)
+    v._skills[0].probe_checks = 1
+    v._skills[1].probe_checks = 3
+    assert v.promote_probes(min_checks=3) == 1
+    kinds = {s.task_id: s.kind for s in v._skills}
+    assert kinds == {"p1": "probe", "p2": "skill"}
+
+
+def test_probe_checks_persist_roundtrip(tmp_path):
+    v = SelfCertVault(directory=str(tmp_path / "vault"))
+    v.commit_probe("p1", "f", "s", "p\n```python\n", _CERT_CODE, _CERT_TESTS, 0.9)
+    v._skills[-1].probe_checks = 3
+    v._save()
+    v2 = SelfCertVault(directory=str(tmp_path / "vault"))
+    assert v2._skills[-1].probe_checks == 3 and v2._skills[-1].kind == "probe"
+
+
+def test_env_promotes_probes_after_accepted_update():
+    """Promote learner: a probe surviving its RRV check graduates once the
+    update is ACCEPTED; the gate reports the promotion count."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_promote",
+                                     learners=["sccl_promote"])
+    env.cfg.sccl_probe_learners = ["sccl_promote"]
+    env.cfg.sccl_probe_check = 1
+    env.cfg.sccl_rrv_math = 0
+    env.cfg.sccl_probe_promote_learners = ["sccl_promote"]
+    env.cfg.sccl_probe_promote_age = 1
+    vault.commit_probe("t0:p", "fam", "Paraphrase.", "PROMPT p\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("executed") and ui.get("accepted"), ui
+    assert ui["gate"]["checked_probes"] == 1
+    assert ui["gate"].get("probes_promoted") == 1
+    probe = next(s for s in vault._skills if s.task_id == "t0:p")
+    assert probe.kind == "skill", "surviving probe must graduate"
+
+
+def test_env_no_promotion_for_other_learners():
+    """Same vault and flags, but the learner is not in the promote set: the
+    probe keeps guarding the frontier as an UNTRAINED check."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_v2", learners=["sccl_v2"])
+    env.cfg.sccl_probe_learners = ["sccl_v2"]
+    env.cfg.sccl_probe_check = 1
+    env.cfg.sccl_rrv_math = 0
+    env.cfg.sccl_probe_promote_learners = ["sccl_promote"]  # sccl_v2 NOT listed
+    env.cfg.sccl_probe_promote_age = 1
+    vault.commit_probe("t0:p", "fam", "Paraphrase.", "PROMPT p\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("accepted"), ui
+    assert ui["gate"].get("probes_promoted", 0) == 0
+    probe = next(s for s in vault._skills if s.task_id == "t0:p")
+    assert probe.kind == "probe"
+
+
+def test_env_no_promotion_on_vetoed_update():
+    """A vetoed (rolled-back) update must not graduate probes either."""
+    env, eng, ver, vault = _sccl_env(regen_passes=False, learner="sccl_promote",
+                                     learners=["sccl_promote"])
+    env.cfg.sccl_probe_learners = ["sccl_promote"]
+    env.cfg.sccl_probe_check = 1
+    env.cfg.sccl_rrv_math = 0
+    env.cfg.sccl_probe_promote_learners = ["sccl_promote"]
+    env.cfg.sccl_probe_promote_age = 1
+    vault.commit_probe("t0:p", "fam", "Paraphrase.", "PROMPT p\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    ui = step_info["update_info"]
+    assert ui.get("executed") and not ui.get("accepted"), ui
+    assert "probes_promoted" not in ui["gate"]
+    probe = next(s for s in vault._skills if s.task_id == "t0:p")
+    assert probe.kind == "probe"

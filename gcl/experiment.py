@@ -158,7 +158,7 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         recall_hits = recall_probe_total = 0
         sccl_stats = {"steps": 0, "certified": 0, "rrv_updates": 0, "rrv_vetoes": 0,
                       "gold_probes": 0, "gold_agree": 0, "cert_conf_sum": 0.0,
-                      "probes_made": 0, "probes_committed": 0}
+                      "probes_made": 0, "probes_committed": 0, "probes_promoted": 0}
         t0 = time.time()
         obs = env.reset()
         last_family_seen = 0
@@ -263,6 +263,7 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     if gate.get("method") == "sccl_rrv" and ui.get("executed"):
                         sccl_stats["rrv_updates"] += 1
                         sccl_stats["rrv_vetoes"] += int(not ui.get("accepted", True))
+                        sccl_stats["probes_promoted"] += int(gate.get("probes_promoted", 0))
                     gt = gate.get("gold_telemetry")
                     if isinstance(gt, dict):
                         sccl_stats["gold_probes"] += 1

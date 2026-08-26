@@ -79,10 +79,11 @@ def _make_embedder(dim: int = 384):
 # ----------------------------- store ----------------------------------------
 class _Skill:
     __slots__ = ("task_id", "family", "prompt", "code", "test_code", "pass_rate",
-                 "reward", "emb", "ts", "domain", "spec", "kind")
+                 "reward", "emb", "ts", "domain", "spec", "kind", "probe_checks")
 
     def __init__(self, task_id, family, prompt, code, test_code, pass_rate, reward,
-                 emb, ts, domain: str = "code", spec: str = "", kind: str = "skill"):
+                 emb, ts, domain: str = "code", spec: str = "", kind: str = "skill",
+                 probe_checks: int = 0):
         self.task_id = task_id; self.family = family; self.prompt = prompt
         self.code = code; self.test_code = test_code; self.pass_rate = pass_rate
         self.reward = reward; self.emb = emb; self.ts = ts
@@ -93,6 +94,9 @@ class _Skill:
         #         "probe" = a certified neighborhood variant it never trained on
         #         (SCCL v2: RRV probes test generalization, not memorization).
         self.kind = kind
+        # `probe_checks`: RRV probe-checks this entry survived (probe curriculum:
+        # surviving enough checks makes a probe eligible for promotion to skill).
+        self.probe_checks = probe_checks
 
 
 class SkillVault:
@@ -327,7 +331,8 @@ class SkillVault:
                                            float(r.get("pass_rate", 0.0)), float(r.get("reward", 0.0)),
                                            emb, float(r.get("ts", 0.0)),
                                            domain=r.get("domain", "code"), spec=r.get("spec", r.get("prompt", "")),
-                                           kind=r.get("kind", "skill")))
+                                           kind=r.get("kind", "skill"),
+                                           probe_checks=int(r.get("probe_checks", 0))))
                 self._embs.append(self._skills[-1].emb)
         except Exception:
             pass
@@ -338,7 +343,8 @@ def _safe_skill_dict(s: _Skill) -> Dict[str, Any]:
             "code": s.code, "test_code": s.test_code, "pass_rate": s.pass_rate,
             "reward": s.reward, "ts": s.ts,
             "domain": getattr(s, "domain", "code"), "spec": getattr(s, "spec", s.prompt),
-            "kind": getattr(s, "kind", "skill")}
+            "kind": getattr(s, "kind", "skill"),
+            "probe_checks": getattr(s, "probe_checks", 0)}
 
 
 def _entry_point(code_or_test: str) -> str:
@@ -405,6 +411,25 @@ class SelfCertVault(SkillVault):
                                      prompt=prompt, code=code, self_tests=self_tests,
                                      conf=conf, domain=domain, entry=entry,
                                      dedup_sim=0.0, kind="probe")
+
+    def promote_probes(self, min_checks: int = 1) -> int:
+        """Graduate probes that survived >= min_checks RRV checks into skills.
+
+        Probe curriculum (v3 candidate): a promoted probe becomes an ordinary
+        certified skill — it joins the certified-rehearsal pool (to_pairs) and
+        stays protected under RRV's skill check, while fresher probes keep
+        guarding the untrained frontier. This converts VALIDATED generalization
+        neighborhoods into training data: every promoted entry was certified and
+        then re-verified by regeneration, so the curriculum remains gold-free.
+        """
+        n = 0
+        for s in self._skills:
+            if getattr(s, "kind", "skill") == "probe" and getattr(s, "probe_checks", 0) >= min_checks:
+                s.kind = "skill"
+                n += 1
+        if n:
+            self._save()
+        return n
 
     def to_pairs(self) -> List[Dict[str, str]]:
         """Replay pairs keyed on the stored regeneration prompt (code + math)."""
@@ -507,7 +532,9 @@ class SelfCertVault(SkillVault):
                 skipped.append(s.task_id)
                 continue
             checked_probes += 1
-            if not self._any_passes(_regen_codes(s.prompt), tests, verifier):
+            if self._any_passes(_regen_codes(s.prompt), tests, verifier):
+                s.probe_checks = getattr(s, "probe_checks", 0) + 1
+            else:
                 broke_probes.append(s.task_id)
 
         # 3) math entries (skill or probe): answer must still match certified value

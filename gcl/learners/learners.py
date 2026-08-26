@@ -279,10 +279,19 @@ class SCCLV2Learner(SCCLLearner):
     name = "sccl_v2"
 
 
+class SCCLProbePromoteLearner(SCCLLearner):
+    """SCCL + probe curriculum (v3 candidate): probes that survive enough RRV
+    checks graduate to certified rehearsal pairs, so validated generalization
+    instances become training data while fresher probes guard the frontier.
+    The promote age/learner-set live in config (sccl_probe_promote_*)."""
+    name = "sccl_promote"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
                                  SelfDistillLearner, ExecFilterLearner,
                                  SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner,
-                                 SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner)}
+                                 SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner,
+                                 SCCLProbePromoteLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

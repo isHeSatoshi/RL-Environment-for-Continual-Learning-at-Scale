@@ -340,6 +340,13 @@ class GroundedContinualEnv:
         if accepted:
             meta = eng.register_adapter(op, {**m, "gate": gate})
             self.update_count += 1
+            # ---- Probe curriculum (v3 candidate, gold-free): probes that have
+            # survived enough RRV checks graduate to certified rehearsal pairs.
+            pp_age = (int(getattr(self.cfg, "sccl_probe_promote_age", 0))
+                      if name in set(getattr(self.cfg, "sccl_probe_promote_learners", []))
+                      else 0)
+            if pp_age > 0 and self.vault is not None:
+                gate["probes_promoted"] = self.vault.promote_probes(pp_age)
             return {"executed": True, "accepted": True, "loss": m["loss_end"],
                     "grad_norm": m["grad_norm"], "adapter_version": meta.version,
                     "hash": meta.content_hash, "gate": gate}

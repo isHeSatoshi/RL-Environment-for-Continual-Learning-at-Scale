@@ -84,7 +84,8 @@ def print_sccl_stats(m: Dict[str, Any], tag: str) -> None:
 def _gate_breakdown(traj_path: str) -> Dict[str, int]:
     counts = {"gated": 0, "accepted": 0, "vetoed": 0,
               "veto_skill": 0, "veto_probe": 0, "veto_math": 0,
-              "probe_checked": 0, "math_checked": 0, "gold_ok": 0, "gold_total": 0}
+              "probe_checked": 0, "math_checked": 0, "promoted": 0,
+              "gold_ok": 0, "gold_total": 0}
     if not os.path.exists(traj_path):
         return counts
     with open(traj_path) as f:
@@ -111,6 +112,7 @@ def _gate_breakdown(traj_path: str) -> Dict[str, int]:
                 counts["probe_checked"] += 1
             if gate.get("checked_math"):
                 counts["math_checked"] += 1
+            counts["promoted"] += int(gate.get("probes_promoted", 0))
             gt = gate.get("gold_telemetry")
             if isinstance(gt, dict):
                 counts["gold_total"] += 1
@@ -128,6 +130,7 @@ def print_gate_breakdown(m: Dict[str, Any], run_dir: str, tag: str) -> None:
             f"  {name:<14} gated={c['gated']:>3} accepted={c['accepted']:>3} "
             f"vetoed={c['vetoed']:>2} [skill={c['veto_skill']} probe={c['veto_probe']} "
             f"math={c['veto_math']}] probe_chk={c['probe_checked']:>3} math_chk={c['math_checked']:>3} "
+            f"promoted={c['promoted']:>2} "
             f"gold_ok={c['gold_ok']}/{c['gold_total']}"
         )
 

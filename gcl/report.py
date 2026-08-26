@@ -63,6 +63,7 @@ def write_results_tex(metrics_path: str, out_tex: str, prefix: str = "") -> Dict
             lines.append(_macro(f"{safe}rrvupdates", str(sc.get("rrv_updates", 0))))
             lines.append(_macro(f"{safe}rrvvetoes", str(sc.get("rrv_vetoes", 0))))
             lines.append(_macro(f"{safe}probes", str(sc.get("probes_committed", 0))))
+            lines.append(_macro(f"{safe}probespromoted", str(sc.get("probes_promoted", 0))))
         vs = d.get("vsr")
         if isinstance(vs, dict):
             lines.append(_macro(f"{safe}vaultsize", str(vs.get("vault_size", 0))))

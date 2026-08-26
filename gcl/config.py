@@ -79,6 +79,10 @@ class ExperimentConfig:
     sccl_probes: int = 1                # probes generated per certified task
     sccl_probe_check: int = 0           # probes re-checked per RRV veto
     sccl_rrv_math: int = 0              # math vault entries re-checked per RRV veto
+    # ---- probe curriculum (v3 candidate; off unless wired into a learner) ----
+    sccl_probe_promote_learners: List[str] = field(default_factory=list)
+    sccl_probe_promote_age: int = 0     # RRV probe-checks survived before a probe
+                                        # graduates to a certified rehearsal pair
     # output
     out_dir: str = "runs/run"
     seed: int = 42
