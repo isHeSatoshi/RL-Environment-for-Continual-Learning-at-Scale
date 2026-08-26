@@ -57,9 +57,21 @@ def main() -> int:
         return 1
 
     # ---- regime identity (config must agree modulo out_dir) -------------------
-    e1, e2 = dict(partial["config"]), dict(vsr["config"])
-    e1.pop("out_dir", None)
-    e2.pop("out_dir", None)
+    # Normalize through the current ExperimentConfig first: runs checkpointed
+    # under older code lack newer fields (sccl_nbhd_*, torch_seed), and raw
+    # dict comparison would flag the missing keys as regime drift.
+    sys.path.insert(0, REPO)
+    import dataclasses
+    from gcl.config import ExperimentConfig
+    fields = {f.name for f in dataclasses.fields(ExperimentConfig)}
+
+    def _norm(cfg: dict) -> dict:
+        known = {k: v for k, v in cfg.items() if k in fields}
+        d = dataclasses.asdict(ExperimentConfig(**known))
+        d.pop("out_dir", None)
+        return d
+
+    e1, e2 = _norm(partial["config"]), _norm(vsr["config"])
     diffs = {k: (e1.get(k), e2.get(k)) for k in set(e1) | set(e2) if e1.get(k) != e2.get(k)}
     if diffs:
         print("ABORT: experiment configs differ beyond out_dir:")
