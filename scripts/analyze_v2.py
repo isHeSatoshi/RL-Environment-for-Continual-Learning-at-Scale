@@ -15,7 +15,10 @@ from typing import Any, Dict, List
 
 
 def _load_run(run_dir: str) -> Dict[str, Any]:
-    with open(os.path.join(run_dir, "metrics.json")) as f:
+    p = os.path.join(run_dir, "metrics.json")
+    if not os.path.exists(p):  # in-flight run: fall back to checkpoint
+        p = os.path.join(run_dir, "metrics_partial.json")
+    with open(p) as f:
         return json.load(f)
 
 
