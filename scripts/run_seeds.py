@@ -76,7 +76,8 @@ def _mean_std(xs: list[float]):
     if not xs:
         return float("nan"), float("nan")
     mu = sum(xs) / len(xs)
-    var = sum((x - mu) ** 2 for x in xs) / len(xs) if len(xs) > 1 else 0.0
+    # sample std (n-1): with 3 seeds the population formula understates
+    var = sum((x - mu) ** 2 for x in xs) / (len(xs) - 1) if len(xs) > 1 else 0.0
     return mu, math.sqrt(var)
 
 
@@ -87,14 +88,20 @@ def aggregate(config_path: str, seeds: list[int]) -> dict:
     os.makedirs(agg_dir, exist_ok=True)
     learners: dict[str, dict[str, list[float]]] = {}
     per_seed: dict[str, dict] = {}
+    hashes: dict[str, str] = {}
+    dirty: list[str] = []
     for seed in seeds:
         mp = os.path.join(f"{base_out}_s{seed}", "metrics.json")
         if not os.path.exists(mp):
             print(f"[seeds] missing {mp} — skipping seed {seed}")
             continue
         m = _load(mp)
+        can = m.get("canary", {})
+        hashes[str(seed)] = can.get("stream_hash", "")
+        if not can.get("clean"):
+            dirty.append(str(seed))
         per_seed[str(seed)] = {
-            "stream_hash": m.get("canary", {}).get("stream_hash", ""),
+            "stream_hash": can.get("stream_hash", ""),
             "learners": {},
         }
         for name, d in m.get("learners", {}).items():
@@ -108,6 +115,11 @@ def aggregate(config_path: str, seeds: list[int]) -> dict:
             for k, v in row.items():
                 slot[k].append(float(v))
     summary: dict[str, dict] = {}
+    # Paper-grade rails: all seeds must have walked the SAME clean stream.
+    if len(set(hashes.values())) > 1:
+        raise RuntimeError(f"stream_hash differs across seeds: {hashes}")
+    if dirty:
+        raise RuntimeError(f"canary NOT clean for seeds: {dirty}")
     print(f"\n=== Seed aggregate ({len(per_seed)} seeds) -> {agg_dir} ===")
     print(f"{'Learner':<14} {'ACC':>14} {'Forget':>14} {'BWT':>14} {'Frontier':>14}")
     for name, cols in learners.items():
