@@ -1013,3 +1013,34 @@ def test_nbhd_config_fields_parse():
     assert cfg.sccl_nbhd_tests == 3
     cfg.sccl_nbhd_learners = ["sccl_n"]
     assert cfg.sccl_nbhd_learners == ["sccl_n"]
+
+
+def test_env_propagates_nbhd_and_probe_audit_fields_to_step_info():
+    """Regression: the experiment attaches sccl_nbhd / sccl_probe to the action
+    metadata; env.step must carry them into step_info so trajectory rows are
+    auditable per-step (analyze_nbhd.py). Telemetry only — the fields must NOT
+    influence the accept/reject decision, which stays certification+RRV driven."""
+    env, eng, ver, vault = _sccl_env(learner="sccl_n", learners=["sccl_n"])
+    nbhd = {"robust": True, "reason": "winner_passes_variant"}
+    probe = {"made": True, "committed": True}
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True),
+                  "sccl_nbhd": nbhd, "sccl_probe": probe}))
+    assert step_info.get("sccl_nbhd") == nbhd
+    assert step_info.get("sccl_probe") == probe
+    # the step still behaves identically: certified target trains and is accepted
+    ui = step_info["update_info"]
+    assert ui.get("executed") and ui.get("accepted"), ui
+
+
+def test_env_no_audit_fields_when_absent_from_metadata():
+    """Rows without a neighborhood/probe attachment must not gain the keys
+    (keeps the trajectory schema backward-compatible with v1/v2 runs)."""
+    env, eng, ver, vault = _sccl_env()
+    o, reward, done, step_info = env.step(Action(
+        answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+        metadata={"sccl": _cert_meta(found=True)}))
+    assert "sccl_nbhd" not in step_info
+    assert "sccl_probe" not in step_info
+

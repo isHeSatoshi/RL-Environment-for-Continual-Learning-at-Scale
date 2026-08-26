@@ -543,4 +543,10 @@ class GroundedContinualEnv:
                                "gate_method": (update_info.get("gate", {}) or {}).get("method", ""),
                                "gate_accepted": update_info.get("accepted", None)}
                               if mode == "sccl" else {})}
+        # Propagate per-step audit fields the experiment attached to the action
+        # (v3 neighborhood verdict, v2 probe manufacture). Telemetry only —
+        # neither field influenced the step's decision.
+        for _k in ("sccl_nbhd", "sccl_probe"):
+            if action.metadata and _k in action.metadata:
+                step_info[_k] = action.metadata[_k]
         return o, reward, self.done, step_info
