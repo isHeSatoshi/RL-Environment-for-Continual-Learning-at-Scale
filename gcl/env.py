@@ -291,19 +291,24 @@ class GroundedContinualEnv:
 
         if use_sccl:
             probe_learner = name in set(getattr(self.cfg, "sccl_probe_learners", []))
+            # ---- SCCL v5: family-STRATIFIED veto pool (gold-free). Off unless
+            # the learner is listed, so all pre-v5 rows stay bit-identical. ----
+            strat = name in set(getattr(self.cfg, "sccl_stratified_learners", []))
             veto = self.vault.selfreplay_veto(
                 eng, self.verifier,
                 check_skills=getattr(self.cfg, "sccl_replay_check", 3),
                 n_samples=getattr(self.cfg, "sccl_replay_samples", 2),
                 check_probes=int(getattr(self.cfg, "sccl_probe_check", 0)) if probe_learner else 0,
-                check_math=int(getattr(self.cfg, "sccl_rrv_math", 0)) if probe_learner else 0)
+                check_math=int(getattr(self.cfg, "sccl_rrv_math", 0)) if probe_learner else 0,
+                stratified=strat)
             gate.update({"veto": veto["veto"], "veto_reason": veto["reason"],
                          "checked": veto["checked"], "broke": veto["broke"],
                          "checked_probes": veto.get("checked_probes", 0),
                          "broke_probes": veto.get("broke_probes", []),
                          "checked_math": veto.get("checked_math", 0),
                          "broke_math": veto.get("broke_math", []),
-                         "skipped": veto.get("skipped", [])})
+                         "skipped": veto.get("skipped", []),
+                         "stratified": veto.get("stratified", False)})
             accepted = not veto["veto"]
             # ---- Gold telemetry ONLY (post-hoc gate-agreement analysis). ----
             # These scores never enter `accepted`; they let the paper quantify

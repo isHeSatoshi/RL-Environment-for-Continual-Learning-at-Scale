@@ -314,6 +314,18 @@ class SCCLAnchorHiLearner(SCCLLearner):
     name = "sccl_anchor_hi"
 
 
+class SCCLStratLearner(SCCLLearner):
+    """SCCL v5 row: family-stratified RRV veto pool. The default veto checks
+    only the newest `check_skills` certified skills, so older families leave
+    the gate's field of view once the stream moves on; a seed-42 post-mortem
+    found every veto broke only active-family skills while arith eroded
+    unchecked. This row draws the check pool newest-per-family instead,
+    keeping ALL certified families under protection. Selection is enabled via
+    cfg.sccl_stratified_learners (env.py); this class only supplies the
+    registry name. Fully gold-free."""
+    name = "sccl_strat"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -321,5 +333,6 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner,
                                  SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner,
                                  SCCLProbePromoteLearner, SCCLNbhdLearner,
-                                 SCCLAnchorLoLearner, SCCLAnchorHiLearner)}
+                                 SCCLAnchorLoLearner, SCCLAnchorHiLearner,
+                                 SCCLStratLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

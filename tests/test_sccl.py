@@ -1155,3 +1155,69 @@ def test_v4_ladder_learners_are_registered_and_isolated():
     for name in ("sccl_anchor_lo", "sccl_anchor_hi"):
         assert name in v4["experiment"]["sccl_learners"], f"{name} missing from sccl_learners"
         assert name in v4["experiment"]["sccl_anchor_learners"], f"{name} missing from sccl_anchor_learners"
+
+
+def test_v5_stratified_pool_selection():
+    """SCCL v5: the family-stratified check pool must take the newest
+    ceil(k/F) skill of EVERY certified family (deterministic, no RNG), so an
+    older family never leaves the gate's field of view. The recency window it
+    replaces (skills[-k:]) is the seed-42 blind spot this fixes."""
+    from gcl.vault import SelfCertVault
+
+    class _S:  # minimal stand-in exposing only what the pool reads
+        def __init__(self, task_id, family):
+            self.task_id = task_id
+            self.family = family
+
+    # arith certified early, then math, string, drift (stream order)
+    skills = ([_S(f"a{i}", "arith") for i in range(4)]
+              + [_S(f"m{i}", "math_word") for i in range(2)]
+              + [_S(f"s{i}", "string") for i in range(3)]
+              + [_S(f"d{i}", "drift") for i in range(3)])
+    pool = SelfCertVault._stratified_pool(skills, 3)
+    ids = [s.task_id for s in pool]
+    # ceil(3/4)=1 newest per family, sorted family keys -> deterministic order
+    assert ids == ["a3", "d2", "m1", "s2"], ids
+    # every family represented exactly once (newest of each)
+    assert sorted(s.family for s in pool) == ["arith", "drift", "math_word", "string"]
+    # k=8 -> ceil(8/4)=2 per family; newest-two of each, order preserved
+    pool8 = SelfCertVault._stratified_pool(skills, 8)
+    assert [s.task_id for s in pool8] == ["a2", "a3", "d1", "d2", "m0", "m1", "s1", "s2"]
+    # determinism: identical input -> identical pool (no hidden RNG)
+    assert [s.task_id for s in SelfCertVault._stratified_pool(skills, 3)] == ids
+    # empty-family fallback and empty-skill edge cases
+    assert SelfCertVault._stratified_pool([], 3) == []
+    mixed = [_S("x0", ""), _S("y0", "arith")]
+    assert [s.task_id for s in SelfCertVault._stratified_pool(mixed, 2)] == ["x0", "y0"]
+
+
+def test_v5_strat_learner_registered_and_wired():
+    """sccl_strat must be a registered SCCL subclass (else experiment.py would
+    silently skip it — the v4 registry bug), and the v5 config must list it in
+    sccl_learners and sccl_stratified_learners while keeping sccl OUT of the
+    stratified list (sccl is the bit-identical recency control)."""
+    import json
+    from gcl.learners.learners import LEARNERS, SCCLLearner, SCCLStratLearner
+    assert issubclass(SCCLStratLearner, SCCLLearner)
+    assert LEARNERS["sccl_strat"] is SCCLStratLearner
+    v5 = json.load(open(os.path.join(os.path.dirname(__file__), "..", "configs", "sccl_v5.json")))
+    exp = v5["experiment"]
+    assert "sccl_strat" in exp["sccl_learners"]
+    assert exp["sccl_stratified_learners"] == ["sccl_strat"], \
+        "only sccl_strat may opt into stratified veto; sccl must stay the recency control"
+    assert "sccl" not in exp["sccl_stratified_learners"]
+    # v4 anchor machinery must be OFF for the v5 ladder (isolate one variable)
+    assert exp["sccl_anchor_learners"] == []
+
+
+def test_v5_veto_default_path_unchanged():
+    """Back-compat: the veto's DEFAULT pool must remain the pure recency window
+    skills[-k:] so every pre-v5 row stays bit-identical. We verify by asserting
+    the stratified branch is only taken when stratified=True is passed."""
+    import inspect
+    from gcl.vault import SelfCertVault
+    sig = inspect.signature(SelfCertVault.selfreplay_veto)
+    assert sig.parameters["stratified"].default is False, \
+        "stratified must default to False (pre-v5 determinism)"
+    src = inspect.getsource(SelfCertVault.selfreplay_veto)
+    assert "skills[-check_skills:]" in src, "recency window must remain the default pool"

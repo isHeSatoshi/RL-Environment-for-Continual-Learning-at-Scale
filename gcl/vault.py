@@ -456,10 +456,30 @@ class SelfCertVault(SkillVault):
                 continue
         return False
 
+    @staticmethod
+    def _stratified_pool(skills: List[Any], k: int) -> List[Any]:
+        """SCCL v5: family-stratified check pool (gold-free).
+
+        The default recency window (skills[-k:]) abandons older families once
+        the stream moves on — a seed-42 post-mortem found every RRV veto broke
+        only active-family skills, so arith was never checked during the phases
+        where arith holdout eroded. This pool takes the newest ceil(k/F)
+        skills of EVERY certified family instead. Deterministic (sorted family
+        keys, no RNG) so seeded runs stay reproducible.
+        """
+        fams: Dict[str, List[Any]] = {}
+        for s in skills:
+            fams.setdefault(getattr(s, "family", "") or "_", []).append(s)
+        per = max(1, -(-k // max(1, len(fams))))  # ceil(k / F)
+        pool: List[Any] = []
+        for fam in sorted(fams):
+            pool.extend(fams[fam][-per:])
+        return pool
+
     def selfreplay_veto(self, engine: Any, verifier: Any, *,
                         check_skills: int = 3, n_samples: int = 2,
                         sample_temp: float = 0.7, check_probes: int = 0,
-                        check_math: int = 0) -> Dict[str, Any]:
+                        check_math: int = 0, stratified: bool = False) -> Dict[str, Any]:
         """Self-Replay Veto (RRV) — the gold-free forgetting detector.
 
         For each recently committed self-certified skill, REGENERATE solutions
@@ -477,6 +497,10 @@ class SelfCertVault(SkillVault):
             answers and require at least one to equal the stored certified
             value (canonical-form comparison). In v1 math entries were never
             protected at all.
+          * stratified — SCCL v5: draw the skill pool family-stratified
+            (newest ceil(k/F) per family) instead of the global last-k, so
+            older certified families stay under gate protection after the
+            stream moves on. Off by default: existing rows stay bit-identical.
 
         Note we deliberately do NOT fall back to executing the stored code: that
         artifact trivially passes its own tests regardless of the model's state,
@@ -506,7 +530,10 @@ class SelfCertVault(SkillVault):
                 return []
 
         # 1) certified code skills the model TRAINED on (v1 behaviour)
-        pool = skills[-check_skills:] if check_skills > 0 else []
+        if check_skills > 0 and stratified:
+            pool = self._stratified_pool(skills, check_skills)
+        else:
+            pool = skills[-check_skills:] if check_skills > 0 else []
         for s in reversed(pool):
             if getattr(s, "domain", "code") != "code" or not (s.test_code or "").strip():
                 skipped.append(s.task_id)
@@ -564,4 +591,5 @@ class SelfCertVault(SkillVault):
                 "checked": checked, "broke": broke,
                 "checked_probes": checked_probes, "broke_probes": broke_probes,
                 "checked_math": checked_math, "broke_math": broke_math,
-                "skipped": skipped, "n_skills": len(self._skills)}
+                "skipped": skipped, "n_skills": len(self._skills),
+                "stratified": stratified}

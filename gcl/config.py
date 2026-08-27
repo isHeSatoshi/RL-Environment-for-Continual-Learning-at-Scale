@@ -100,6 +100,13 @@ class ExperimentConfig:
     # per-learner override of the anchor strength (for a lambda ablation in one
     # ladder); falls back to sccl_anchor_lambda when a learner is absent here.
     sccl_anchor_lambdas: dict = field(default_factory=dict)
+    # ---- SCCL v5: family-stratified RRV veto pool (gold-free gate coverage) ----
+    # The default veto re-checks only skills[-sccl_replay_check:], a RECENCY
+    # window; once the stream moves on, older certified families leave the gate's
+    # field of view (seed-42 post-mortem: every veto broke only active-family
+    # skills while arith eroded unchecked). Listed learners draw the check pool
+    # newest-per-family instead. Off by default => pre-v5 rows bit-identical.
+    sccl_stratified_learners: List[str] = field(default_factory=list)
     # output
     out_dir: str = "runs/run"
     seed: int = 42
