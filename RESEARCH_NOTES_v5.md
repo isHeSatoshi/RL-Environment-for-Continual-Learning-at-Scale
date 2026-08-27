@@ -586,3 +586,71 @@ Branch D must therefore attack (1) with a DIVERSE witness (an ensemble spanning
 a family's skill axes, not k variants of one spec) and (2) with an in-update
 regularizer (anchor) that protects unwitnessed axes — the two are complementary
 exactly as v5's anchor (weights) and v5b's probes (evidence) were.
+
+## BRANCH D PRE-REGISTRATION — SCCL v6 (capability ENSEMBLES + anchor) (2026-08-28, BEFORE any v6 run)
+
+The v5b telemetry localizes three separable failure mechanisms:
+  M1 skill-heterogeneity blindness — one newest-per-family probe witnesses ONE
+     skill axis; a cross-family update destroys an unwitnessed axis (arith
+     numeric/geometry axis collapsed while the string-axis probe passed).
+  M2 filter-not-regularizer — the veto only selects among candidates, never
+     pulls weights, so accepted updates still drift (survivorship overfit).
+  M3 cross-family interference — in-phase arith/math training net-preserved
+     arith; the terminal damage was inflicted by string/drift-phase updates.
+
+Branch D attacks M1 with a WIDER witness and M2/M3 with an in-update
+regularizer, composed. Both are the exact complements the v5/v5b arc predicts.
+
+INTERVENTION 1 — capability ENSEMBLE (attacks M1). Generalize the v5b cap-probe
+pool from newest-ONE-per-family to a bounded ENSEMBLE of up to K distinct
+source-skill probes per family. The veto re-checks ALL probes in the ensemble
+(any break = veto). K=1 must be bit-identical to v5b (inertness); K=3 is the
+treatment. Rationale: the ensemble spans K skill axes of a heterogeneous family
+instead of one, raising the veto's true-positive rate on cross-family damage.
+Gold-free: probes are still manufactured from spec only, never trained on.
+
+INTERVENTION 2 — in-update base anchor (attacks M2/M3). Compose the engaged v4/v5
+anchor (quadratic pull toward LoRA init, lambda=0.1) on top of the capability
+gate. Rationale: the anchor trims per-update weight drift and protects skill
+axes that no probe witnesses; v5 showed it is the best stability cell
+(frontier +0.613, BWT +0.207) and fully neutralized stratification harm.
+
+LADDER — configs/sccl_v6.json. Same stream hash 554ce43f182b, torch_seed=42,
+seed = 42 + learner index, gold-free throughout (gold only final eval +
+telemetry). Learner index is FIXED to preserve the v5b seeding for the
+determinism rows:
+  idx  name                  K  anchor  strat  role
+  0    frozen                -  off     -      determinism vs v5b (seed 42)
+  1    sccl                  -  off     -      determinism vs v5b (seed 43)
+  2    sccl_capprobe         1  off     off    determinism vs v5b (seed 44)
+  3    sccl_capprobe_strat   1  off     on     determinism vs v5b (seed 45)
+  4    sccl_capens           3  off     on     H1 ensemble (seed 46)
+  5    sccl_cap_anchor       1  on .1   on     H2 anchor (seed 47)
+  6    sccl_capens_anchor    3  on .1   on     H3 composition / candidate (48)
+The 2x2 factorial (ensemble {K1,K3} x anchor {off,on}) sits on the stratified
+capability base; its K1/anchor-off cell IS the v5b capprobe_strat rerun, so the
+ensemble and anchor main effects and their interaction are all identified.
+
+HYPOTHESES (pre-registered, falsifiable):
+  H1 (ensemble):  sccl_capens arith > sccl_capprobe_strat arith (0.375).
+  H2 (anchor):    sccl_cap_anchor arith > sccl_capprobe_strat arith (0.375).
+  H3 (composition): sccl_capens_anchor arith >= max(capens, cap_anchor) AND
+     best ACC among the capability cells.
+  BREAKTHROUGH rule: sccl_capens_anchor arith >= 0.55 AND frontier >=
+     sccl.frontier - 0.02  ->  multi-seed (43/44) BEFORE any headline claim.
+  Prediction (direction): if M1+M3 dominate, the ensemble rows veto more
+     cross-family damaging updates (higher cap-veto true positives in
+     string/drift phases), stabilizing arith toward frozen 0.6 at a measurable
+     plasticity cost; anchor rows reduce broad per-update drift; composition
+     does both.
+
+FAIL-CLOSED CHECKS (any failure = abort, do not interpret):
+  C1 determinism: frozen, sccl, sccl_capprobe, sccl_capprobe_strat rows
+     bit-reproduce runs/sccl_v5b on every computed metric.
+  C2 ensemble engagement: K=3 rows must retain >1 distinct-source-skill
+     cap_probe per family in the vault AND log checked_cap >1 in gate records.
+  C3 anchor engagement: anchor rows log anchor_pen > 0 on every accepted update
+     (and the K=1/off rows log exactly 0).
+  C4 isolation: frozen/sccl rows commit zero cap_probes and log checked_cap=0.
+  C5 gold-free: no gold field enters any accept/reject decision (AST audit +
+     the cap/anchor code paths read only spec/self-tests/init-weights).
