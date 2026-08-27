@@ -1301,21 +1301,26 @@ def test_anchor_actually_pulls_weights_toward_base():
     import torch
     pairs = [{"prompt": "def add(a, b):\n", "target": "    return a + b\n"}]
 
-    def run(anchor_lambda: float) -> float:
+    def run(anchor_lambda: float):
         eng = _tiny_anchor_engine(123)  # identical init each call
         init = {n: p.detach().clone() for n, p in eng.model.named_parameters()
                 if p.requires_grad}
         torch.manual_seed(7)  # identical data/ordering path
-        eng.apply_update([dict(p) for p in pairs], anchor_lambda=anchor_lambda)
-        return sum(float((p - init[n]).pow(2).sum())
+        out = eng.apply_update([dict(p) for p in pairs], anchor_lambda=anchor_lambda)
+        dist = sum(float((p - init[n]).pow(2).sum())
                    for n, p in eng.model.named_parameters() if p.requires_grad)
+        return dist, out["anchor_pen"]
 
-    d_free = run(0.0)
-    d_anch = run(5.0)
+    d_free, ap_free = run(0.0)
+    d_anch, ap_anch = run(5.0)
     assert d_free > 0.0, "unanchored update did not move the weights at all"
     assert d_anch < d_free, (
         f"anchor had no effect (dist anchored={d_anch:.6g} >= free={d_free:.6g}); "
         "the penalty term is not reaching the loss")
+    # the per-update audit field must make (non-)engagement visible in the run
+    # artifacts: 0.0 on every update is the v4 no-op signature.
+    assert ap_free == 0.0
+    assert ap_anch > 0.0, "anchor_pen must log > 0 when the anchor engages"
 
 
 def test_v5_veto_default_path_unchanged():

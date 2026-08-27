@@ -364,7 +364,8 @@ class GroundedContinualEnv:
                 gate["probes_promoted"] = self.vault.promote_probes(pp_age)
             return {"executed": True, "accepted": True, "loss": m["loss_end"],
                     "grad_norm": m["grad_norm"], "adapter_version": meta.version,
-                    "hash": meta.content_hash, "anchor_lambda": anch, "gate": gate}
+                    "hash": meta.content_hash, "anchor_lambda": anch,
+                    "anchor_pen": m.get("anchor_pen", 0.0), "gate": gate}
         eng._restore(snap)
         self.rollback_count += 1
         return {"executed": True, "accepted": False,

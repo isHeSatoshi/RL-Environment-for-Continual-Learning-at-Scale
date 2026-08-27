@@ -204,7 +204,7 @@ class TrainingEngine:
         # Optional base-anchor (vsr_bounded). Precompute the frozen base once.
         base_anchor = self._base_anchor() if anchor_lambda > 0 else None
 
-        losses, last_gn = [], 0.0
+        losses, last_gn, last_ap = [], 0.0, 0.0
         self.model.train()
         for _ in range(steps):
             loss = self._loss_on_batch(eff_pairs)
@@ -213,6 +213,9 @@ class TrainingEngine:
                 for n, p in self.model.named_parameters():
                     if p.requires_grad and n in base_anchor:
                         anch_pen = anch_pen + (p - base_anchor[n]).pow(2).sum()
+                # Effect audit trail: 0.0 on every update is the signature of
+                # the v4 no-op bug (key mismatch); a live anchor logs > 0.
+                last_ap = float(anch_pen.detach())
                 loss = loss + 0.5 * anchor_lambda * anch_pen
             if ewc_lambda > 0 and self._fisher is not None and self._anchor is not None:
                 pen = 0.0
@@ -232,7 +235,8 @@ class TrainingEngine:
             self._replay = self._replay[-1024:]
         return {"loss_start": losses[0], "loss_end": losses[-1], "grad_norm": last_gn,
                 "n_pairs": len(eff_pairs), "replay_used": k, "steps": steps,
-                "ewc_lambda": ewc_lambda, "anchor_lambda": anchor_lambda}
+                "ewc_lambda": ewc_lambda, "anchor_lambda": anchor_lambda,
+                "anchor_pen": last_ap}
 
     # ---- bounded update step: LR decays with depth to stop endless drift ------
     def bounded_lr(self, base_lr: Optional[float] = None) -> float:
