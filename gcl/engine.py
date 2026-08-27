@@ -141,11 +141,16 @@ class TrainingEngine:
     def _base_anchor(self) -> Dict[str, torch.Tensor]:
         """Snapshot of the LoRA adapter as initialized (i.e. 'no skill yet'). On the
         vsr_bounded path, every update is pulled toward this. Implements the base-model
-        anchor cheaply: LoRA init is mathematically equivalent to the frozen base."""
+        anchor cheaply: LoRA init is mathematically equivalent to the frozen base.
+
+        Keys MUST come from named_parameters(), not get_peft_model_state_dict():
+        the penalty loop in apply_update matches by named_parameters() name, and
+        PEFT state-dict keys strip the adapter segment ('lora_A.weight' vs
+        'lora_A.default.weight'), which silently matches nothing and turns the
+        anchor into a no-op (the v4/v5 ladder bug)."""
         if self._lora_base is None:
-            from peft import get_peft_model_state_dict
-            self._lora_base = {k: v.detach().clone() for k, v in
-                               get_peft_model_state_dict(self.model).items()}
+            self._lora_base = {n: p.detach().clone() for n, p in
+                               self.model.named_parameters() if p.requires_grad}
         return self._lora_base
 
     # ---- snapshots (zero copy) ----

@@ -1222,6 +1222,85 @@ def test_v5_strat_learner_registered_and_wired():
                               "sccl_anchor_strat", "vsr_nogold"]
 
 
+# ---------------------------------------------------------------------------
+# SCCL v4/v5 base anchor — ENGINE-LEVEL engagement tests.
+# The original v4 tests only checked config wiring and the audit trail, and a
+# PEFT key mismatch (state-dict keys strip the adapter segment: 'lora_A.weight'
+# vs named_parameters' 'lora_A.default.weight') made the anchor a silent no-op
+# across the whole v4 ladder. These tests fail on that bug class.
+# ---------------------------------------------------------------------------
+
+def _tiny_anchor_engine(seed: int):
+    """CPU scratch engine: tiny from-scratch GPT2 + PEFT LoRA + cached tokenizer.
+    Never touches the real 3B checkpoint or the GPU."""
+    import torch
+    from types import SimpleNamespace
+    from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel
+    from peft import LoraConfig, get_peft_model
+    from gcl.engine import TrainingEngine
+
+    torch.manual_seed(seed)
+    tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-1.5B-Instruct")
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    mcfg = GPT2Config(vocab_size=len(tok), n_positions=64, n_embd=32,
+                      n_layer=2, n_head=2)
+    base = GPT2LMHeadModel(mcfg)
+    model = get_peft_model(base, LoraConfig(r=4, lora_alpha=8, lora_dropout=0.0,
+                                            bias="none", target_modules=["c_attn"],
+                                            task_type="CAUSAL_LM"))
+    eng = TrainingEngine.__new__(TrainingEngine)  # skip HF model loading
+    eng.cfg = SimpleNamespace(train_steps_per_update=3, learning_rate=3e-3,
+                              max_seq_len=64)
+    eng.device = "cpu"
+    eng.tokenizer = tok
+    eng.model = model
+    eng._lora_base = None
+    eng._fisher = None
+    eng._anchor = None
+    eng._replay = []
+    eng.updates_done = 0
+    eng._update_idx = 0
+    return eng
+
+
+def test_anchor_base_keys_match_named_parameters():
+    """Regression: _base_anchor() keys must intersect named_parameters() names,
+    else the penalty loop matches nothing and the anchor silently does nothing
+    (the v4 ladder bug)."""
+    eng = _tiny_anchor_engine(0)
+    anchor = eng._base_anchor()
+    np_names = {n for n, p in eng.model.named_parameters() if p.requires_grad}
+    assert anchor, "base anchor snapshot is empty"
+    assert set(anchor.keys()) == np_names, (
+        "anchor keys must be exactly the trainable named_parameters names; "
+        "PEFT state-dict keys strip the adapter segment and match nothing")
+
+
+def test_anchor_actually_pulls_weights_toward_base():
+    """Functional engagement: identical seed, data, and init; the anchored
+    update must end strictly CLOSER to LoRA init than the unanchored one.
+    A no-op anchor (zero penalty) makes the two distances equal."""
+    import torch
+    pairs = [{"prompt": "def add(a, b):\n", "target": "    return a + b\n"}]
+
+    def run(anchor_lambda: float) -> float:
+        eng = _tiny_anchor_engine(123)  # identical init each call
+        init = {n: p.detach().clone() for n, p in eng.model.named_parameters()
+                if p.requires_grad}
+        torch.manual_seed(7)  # identical data/ordering path
+        eng.apply_update([dict(p) for p in pairs], anchor_lambda=anchor_lambda)
+        return sum(float((p - init[n]).pow(2).sum())
+                   for n, p in eng.model.named_parameters() if p.requires_grad)
+
+    d_free = run(0.0)
+    d_anch = run(5.0)
+    assert d_free > 0.0, "unanchored update did not move the weights at all"
+    assert d_anch < d_free, (
+        f"anchor had no effect (dist anchored={d_anch:.6g} >= free={d_free:.6g}); "
+        "the penalty term is not reaching the loss")
+
+
 def test_v5_veto_default_path_unchanged():
     """Back-compat: the veto's DEFAULT pool must remain the pure recency window
     skills[-k:] so every pre-v5 row stays bit-identical. We verify by asserting
