@@ -103,7 +103,9 @@ def main() -> None:
         ups = [e.get("update_info", {}) for e in load_updates(FIXED, name)]
         ups = [u for u in ups if u.get("executed")]
         pens = [u.get("anchor_pen", 0.0) for u in ups if u.get("accepted")]
-        lams = {u.get("anchor_lambda", 0.0) for u in ups}
+        # anchor_lambda is surfaced only on ACCEPTED updates (rejected ones
+        # never carry it), so restrict the lambda audit to the same set.
+        lams = {u.get("anchor_lambda", 0.0) for u in ups if u.get("accepted")}
         if not pens:
             failures.append(f"engagement: {name} has no accepted updates")
             continue
