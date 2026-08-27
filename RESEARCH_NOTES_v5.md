@@ -522,3 +522,67 @@ it passes while broad capability erodes (branch c), and veto pressure itself
 degrades the accepted-update distribution (finding 4). Per the pre-registered
 decision tree, next step is Branch D, informed by the adapter-level gold
 telemetry (which accepted update broke arith, and did the probe really pass).
+
+## POST-HOC GOLD TELEMETRY — arith erosion timeline (2026-08-28, runs/sccl_v5b)
+
+Measurement-only analysis of the `gold_telemetry` block the gate logged at run
+time on the arith gold holdout (4 tasks, never used in any decision). Script:
+`scripts/v5b_telemetry.py`; artifact: `runs/sccl_v5b/telemetry_arith_erosion.json`.
+`base` = frozen arith gold (0.600, cached at the first gate); `cand` = the arith
+gold level each ACCEPTED adapter left behind. Erosion = cand < prev_cand − 0.05.
+
+Per-learner headline:
+
+| learner | accepted | erosion updates | probe-checked erosions | probe PASSED despite erosion | insensitivity | final arith gold |
+|---|--:|--:|--:|--:|--:|--:|
+| sccl | 17 | 4 (23.5%) | 0 (probes off) | — | — | 0.400 |
+| sccl_capprobe | 9 | 1 (11.1%) | 1 | 1 | 100% | 0.375 |
+| sccl_capprobe_strat | 15 | 4 (26.7%) | 4 | **4** | **100%** | 0.375 |
+
+Every probe-checked erosion passed its capability probe. The veto's capability
+stratum had a 0% true-positive rate on real arith damage in this run.
+
+Causal timeline for `sccl_capprobe_strat` (the best row):
+- arith phase + math phase are NET-SAFE: arith gold oscillates 0.4–0.6 and is
+  back at the frozen 0.600 by v6/v7 (end of math phase). The gate + probes are
+  not the story here — plain in-phase training doesn't kill arith.
+- v11 (string phase, mbpp_57 "largest number from digits"): 0.575 → 0.375,
+  −0.200, cap-probe checked=3, verdict PASS. Gold gate would REJECT.
+- v12 (string phase, mbpp_587 list→tuple): 0.375 → 0.600, +0.225 (recovery).
+- **v13 (drift phase, drift_drift_0 "elementwise tuples"): 0.600 → 0.150,
+  −0.450 — the catastrophic update. cap-probe checked=3, verdict PASS (all three
+  family probes). Gold gate would REJECT.** Instance stratum also PASS (checked=2).
+- v14 (drift phase, drift_drift_1): 0.150 → 0.375, +0.225 (partial recovery).
+  Final 0.375 = the metrics.json endpoint exactly.
+
+So the terminal damage is inflicted by CROSS-FAMILY updates (string v11, drift
+v13), not by arith-phase training — and both sailed through all three capability
+probes.
+
+Why the probe is blind here (the refined mechanism): the arith family is mbpp
+offset 0, which is SKILL-HETEROGENEOUS. Its 4 gold holdout tasks are
+mbpp_444 (trim tuples), mbpp_82 (sphere volume), mbpp_581 (square-pyramid
+surface area), mbpp_304 (element after rotation): two numeric/geometry tasks
+(frozen 1.0, 1.0) and two list/tuple-manipulation tasks (frozen 0.2, 0.2).
+Final per-task scores for capprobe_strat: mbpp_444 0.2 (held), mbpp_82 1.0
+(held), **mbpp_581 1.0 → 0.2 (destroyed)**, mbpp_304 0.2 → 0.1. The newest
+arith cap-probe at v13 was mbpp_604:c0, a paraphrase of "reverse the order of
+words" — a STRING-manipulation witness. The catastrophic drift update
+(tuple-manipulation) destroyed the numeric/geometry sub-skill (pyramid surface
+area) while leaving the string-manipulation sub-skill intact, so the word-
+reversal probe passed. "Family" is coarser than "skill dimension": a single
+newest-per-family probe witnesses one skill axis of a multi-axis family.
+
+This sharpens the v5b verdict into three separable failure mechanisms:
+1. Skill-heterogeneity blindness: one probe per family cannot cover a family's
+   multiple skill axes; cross-family updates hit the unwitnessed axis.
+2. Filter-not-regularizer: even when a probe could in principle catch an update,
+   the veto only selects among candidates; it never pulls weights, so accepted
+   updates still drift (survivorship overfit, trained 0.8 vs holdout 0.375).
+3. Cross-family interference is the dominant damage source: in-phase arith/math
+   training net-preserved arith; string/drift training destroyed it.
+
+Branch D must therefore attack (1) with a DIVERSE witness (an ensemble spanning
+a family's skill axes, not k variants of one spec) and (2) with an in-update
+regularizer (anchor) that protects unwitnessed axes — the two are complementary
+exactly as v5's anchor (weights) and v5b's probes (evidence) were.
