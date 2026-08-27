@@ -41,6 +41,18 @@ collapsed arith holdout?
    via neighborhood-probe checking and still lands at arith 0.400. The probes
    catch same-family generalization loss; they do nothing for abandoned older
    families.
+4. **Gold telemetry quantifies the blind spot (measurement-only, post-hoc).**
+   The gate's gold_telemetry probe (holdout[:4], never in-loop) shows that of
+   sccl's 17 accepted updates, a gold holdout gate would have REJECTED 15
+   (probe score 0.600 -> 0.200–0.400 on each) and accepted only 2. So the
+   damage WAS per-update detectable by a gate with global coverage — but the
+   same gold gate is over-eager: rejecting 88% of updates would have halted
+   nearly all learning (stream ACC would collapse). Hence neither extreme
+   works: the gold-free RRV gate is locally right but globally blind; the gold
+   gate is globally aware but plasticity-crushing. The fix must be STRUCTURAL:
+   keep global capability intact without per-update global verification. That
+   is exactly v4 (anchor: reduce damage per update) and v5 (stratified veto:
+   keep every certified family under cheap self-test coverage).
 
 So there are two candidate sub-mechanisms for the collapse:
 
