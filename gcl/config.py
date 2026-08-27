@@ -126,6 +126,17 @@ class ExperimentConfig:
     sccl_capprobe_check: int = 0        # >0 => veto re-checks the per-family pool
     sccl_capprobe_budget: float = 0.5   # phase veto fraction that arms the guard
     sccl_capprobe_margin: int = 2       # extra regenerations under the guard
+    # ---- SCCL v6: capability-probe ENSEMBLE pool (Branch D) ----
+    # v5b telemetry (runs/sccl_v5b/telemetry_arith_erosion.json): every
+    # probe-checked arith erosion PASSED its probe (100% insensitivity) because
+    # the newest-per-family pool witnesses ONE skill axis of a heterogeneous
+    # family; the catastrophic update destroyed an unwitnessed axis. Listed
+    # pool sizes >1 keep up to K distinct-source-skill probes per family
+    # (freshest variant per skill, K freshest skills) and the veto re-checks
+    # ALL of them. sccl_capprobe_pool is the default (1 = v5b behaviour,
+    # bit-identical); sccl_capprobe_pools overrides per learner name.
+    sccl_capprobe_pool: int = 1
+    sccl_capprobe_pools: dict = field(default_factory=dict)
     # output
     out_dir: str = "runs/run"
     seed: int = 42

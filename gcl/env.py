@@ -305,6 +305,10 @@ class GroundedContinualEnv:
             cap_learner = name in set(getattr(self.cfg, "sccl_capprobe_learners", []))
             cap_check = (int(getattr(self.cfg, "sccl_capprobe_check", 0))
                          if cap_learner else 0)
+            # ---- SCCL v6: per-learner ensemble pool size for cap probes ----
+            _cpools = getattr(self.cfg, "sccl_capprobe_pools", {}) or {}
+            cap_pool = (int(_cpools.get(name, getattr(self.cfg, "sccl_capprobe_pool", 1)))
+                        if cap_learner else 1)
             cap_margin = 0
             cap_armed = False
             if cap_check > 0 and task is not None:
@@ -326,7 +330,8 @@ class GroundedContinualEnv:
                 check_math=int(getattr(self.cfg, "sccl_rrv_math", 0)) if probe_learner else 0,
                 stratified=strat,
                 check_cap_probes=cap_check,
-                cap_margin=cap_margin)
+                cap_margin=cap_margin,
+                cap_pool=cap_pool)
             if cap_check > 0:
                 self._cap_attempts += 1
                 if veto["veto"] and veto.get("broke_cap"):

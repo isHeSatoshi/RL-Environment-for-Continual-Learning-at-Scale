@@ -281,6 +281,12 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     n_cap = int(getattr(cfg, "sccl_capprobes", 0))
                     if cr.found and vault is not None and n_cap > 0 and \
                             name in set(getattr(cfg, "sccl_capprobe_learners", [])):
+                        # SCCL v6: per-learner ensemble pool size (must match the
+                        # veto-side resolution in env.py so the pool the gate
+                        # checks is exactly the pool that is retained).
+                        _cpools = getattr(cfg, "sccl_capprobe_pools", {}) or {}
+                        _cpool = int(_cpools.get(
+                            name, getattr(cfg, "sccl_capprobe_pool", 1)))
                         cap_made = []
                         for i in range(n_cap):
                             try:
@@ -301,7 +307,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                                 self_tests=cp.get("self_tests") or [],
                                 conf=float(cp.get("confidence", 0.0)),
                                 domain=cp.get("domain", task.domain),
-                                entry=cp.get("entry", ""))
+                                entry=cp.get("entry", ""),
+                                pool=_cpool)
                             sccl_stats["cap_probes_committed"] += int(bool(committed))
                             cap_made.append(bool(committed))
                         meta_extra["sccl_cap_probe"] = {"made": cap_made}

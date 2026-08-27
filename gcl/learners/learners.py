@@ -370,6 +370,50 @@ class SCCLCapProbeStratLearner(SCCLLearner):
     name = "sccl_capprobe_strat"
 
 
+class SCCLCapEnsLearner(SCCLLearner):
+    """SCCL v6 (Branch D) ensemble row: capability-probe ENSEMBLE. The v5b
+    telemetry (runs/sccl_v5b/telemetry_arith_erosion.json) found 100% probe
+    insensitivity — every probe-checked arith erosion PASSED its single
+    newest-per-family probe, because a heterogeneous family has multiple SKILL
+    AXES and one probe witnesses only one; the catastrophic cross-family update
+    destroyed an unwitnessed axis (arith numeric/geometry) while the witnessed
+    string axis kept passing. This row generalizes the cap-probe pool from
+    newest-one-per-family to a bounded ENSEMBLE of up to K distinct source-skill
+    probes per family (cfg.sccl_capprobe_pools / sccl_capprobe_pool, K=3 here),
+    and the veto re-checks ALL of them (any break = veto). Built on the
+    stratified skill pool (cfg.sccl_stratified_learners). This class only
+    supplies the registry name; wiring is name-based. Fully gold-free."""
+    name = "sccl_capens"
+
+
+class SCCLCapAnchorLearner(SCCLLearner):
+    """SCCL v6 (Branch D) anchor row: in-update base anchor (v4/v5, lambda from
+    cfg.sccl_anchor_lambdas via cfg.sccl_anchor_learners) composed on the v5b
+    capability gate (single newest-per-family probe, K=1) + stratified pool.
+    Rationale: the veto is a FILTER, not a regularizer — it selects among
+    candidates but never pulls weights, so accepted updates still drift and
+    damage skill axes no probe witnesses. The anchor (quadratic pull toward
+    LoRA init) trims that per-update drift; v5 showed it is the best stability
+    cell (frontier +0.613, BWT +0.207). This isolates the anchor main effect
+    against the K=1/anchor-off cell (sccl_capprobe_strat). This class only
+    supplies the registry name; wiring is name-based. Fully gold-free."""
+    name = "sccl_cap_anchor"
+
+
+class SCCLCapEnsAnchorLearner(SCCLLearner):
+    """SCCL v6 (Branch D) composition row — the pre-registered breakthrough
+    candidate: capability-probe ENSEMBLE (K=3, wider witness, attacks
+    skill-heterogeneity blindness) AND in-update base anchor (lambda=0.1,
+    in-update regularizer protecting unwitnessed axes) on the stratified pool.
+    The two mechanisms are exact complements: the ensemble widens the EVIDENCE
+    the veto consumes (v5b's lesson), the anchor acts INSIDE the update on the
+    weights the veto never inspects (v4/v5's lesson). Pre-registered rule:
+    arith >= 0.55 AND frontier >= sccl - 0.02 -> multi-seed before headline.
+    This class only supplies the registry name; wiring is name-based. Fully
+    gold-free."""
+    name = "sccl_capens_anchor"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -379,5 +423,7 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLProbePromoteLearner, SCCLNbhdLearner,
                                  SCCLAnchorLoLearner, SCCLAnchorHiLearner,
                                  SCCLStratLearner, SCCLAnchorStratLearner,
-                                 SCCLCapProbeLearner, SCCLCapProbeStratLearner)}
+                                 SCCLCapProbeLearner, SCCLCapProbeStratLearner,
+                                 SCCLCapEnsLearner, SCCLCapAnchorLearner,
+                                 SCCLCapEnsAnchorLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

@@ -1,0 +1,137 @@
+{
+  "_comment": "SCCL v6 (Branch D of RESEARCH_NOTES_v5.md, pre-registered 2026-08-28 BEFORE any v6 run): capability-probe ENSEMBLES + in-update base anchor, composed. Motivation: the v5b post-hoc gold telemetry (runs/sccl_v5b/telemetry_arith_erosion.json) measured 100% probe insensitivity and localized three mechanisms: M1 skill-heterogeneity blindness (one newest-per-family probe witnesses ONE skill axis; the catastrophic drift-phase update destroyed the unwitnessed arith numeric/geometry axis while the string-axis probe passed), M2 filter-not-regularizer (the veto selects candidates but never pulls weights, so accepted updates still drift), M3 cross-family interference (terminal arith damage was inflicted by string/drift-phase updates, not in-phase training). INTERVENTION 1 (attacks M1): generalize the cap-probe pool to an ENSEMBLE of up to K distinct-source-skill probes per family (sccl_capprobe_pools), veto re-checks ALL of them (any break = veto); K=1 is bit-identical to v5b (inertness/determinism), K=3 is the treatment. INTERVENTION 2 (attacks M2/M3): the engaged v4/v5 in-update base anchor (quadratic pull toward LoRA init, lambda=0.1 via sccl_anchor_lambdas) composed on the capability gate. LADDER (learner index FIXED to preserve v5b seeding for the determinism rows, seed = torch_seed 42 + idx): 0 frozen, 1 sccl, 2 sccl_capprobe(K1,off,off), 3 sccl_capprobe_strat(K1,off,on), 4 sccl_capens(K3,off,on), 5 sccl_cap_anchor(K1,on,on), 6 sccl_capens_anchor(K3,on,on). The 2x2 factorial (ensemble {K1,K3} x anchor {off,on}) sits on the stratified capability base; its K1/anchor-off cell IS the v5b capprobe_strat rerun, so both main effects and their interaction are identified. Same stream hash 554ce43f182b, torch_seed=42, gold-free throughout (gold only final eval + post-hoc telemetry). PRE-REGISTERED SUCCESS RULE: sccl_capens_anchor arith >= 0.55 AND frontier >= sccl.frontier - 0.02 -> multi-seed (43/44) BEFORE any headline claim. FAIL-CLOSED checks C1-C5 enforced by scripts/v6_check.py (determinism vs runs/sccl_v5b, ensemble engagement, anchor engagement, isolation, gold-free).",
+  "stream": {
+    "seed": 42,
+    "families": [
+      {
+        "corpus": "mbpp",
+        "name": "arith",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "math",
+        "name": "math_word",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "mbpp",
+        "name": "string",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 12
+      },
+      {
+        "corpus": "mbpp",
+        "name": "drift",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 24,
+        "drift": {
+          "kind": "spec_perturb"
+        }
+      }
+    ]
+  },
+  "experiment": {
+    "model_name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "learning_rate": 0.0003,
+    "train_steps_per_update": 4,
+    "max_updates": 60,
+    "temperature": 0.1,
+    "max_new_tokens": 256,
+    "gate_epsilon": 0.05,
+    "holdout_size": 8,
+    "use_vsr_gate": true,
+    "use_reference_injection": true,
+    "vsr_learners": [
+      "vsr"
+    ],
+    "refinject_learners": [
+      "vsr"
+    ],
+    "vault_commit_min": 0.9,
+    "vault_retrieve_k": 3,
+    "vault_gate_check": 3,
+    "sccl_learners": [
+      "sccl",
+      "sccl_capprobe",
+      "sccl_capprobe_strat",
+      "sccl_capens",
+      "sccl_cap_anchor",
+      "sccl_capens_anchor"
+    ],
+    "sccl_nogate_learners": [],
+    "sccl_nocons_learners": [],
+    "sccl_k": 6,
+    "sccl_temp": 0.8,
+    "sccl_test_bags": 2,
+    "sccl_tests_per_bag": 4,
+    "sccl_tau": 0.65,
+    "sccl_tau_math": 0.6,
+    "sccl_derive_entry": true,
+    "sccl_replay_check": 3,
+    "sccl_replay_samples": 2,
+    "sccl_gate_probe": 4,
+    "sccl_replay_learners": [],
+    "sccl_replay_k": 0,
+    "sccl_probe_learners": [],
+    "sccl_probes": 0,
+    "sccl_probe_check": 0,
+    "sccl_rrv_math": 0,
+    "sccl_probe_promote_learners": [],
+    "sccl_probe_promote_age": 0,
+    "sccl_nbhd_learners": [],
+    "sccl_nbhd_tests": 0,
+    "sccl_anchor_learners": [
+      "sccl_cap_anchor",
+      "sccl_capens_anchor"
+    ],
+    "sccl_anchor_lambda": 0.0,
+    "sccl_anchor_lambdas": {
+      "sccl_cap_anchor": 0.1,
+      "sccl_capens_anchor": 0.1
+    },
+    "sccl_stratified_learners": [
+      "sccl_capprobe_strat",
+      "sccl_capens",
+      "sccl_cap_anchor",
+      "sccl_capens_anchor"
+    ],
+    "sccl_capprobe_learners": [
+      "sccl_capprobe",
+      "sccl_capprobe_strat",
+      "sccl_capens",
+      "sccl_cap_anchor",
+      "sccl_capens_anchor"
+    ],
+    "sccl_capprobes": 1,
+    "sccl_capprobe_check": 4,
+    "sccl_capprobe_budget": 0.5,
+    "sccl_capprobe_margin": 2,
+    "sccl_capprobe_pool": 1,
+    "sccl_capprobe_pools": {
+      "sccl_capens": 3,
+      "sccl_capens_anchor": 3
+    },
+    "self_taught_learners": [],
+    "out_dir": "runs/sccl_v6",
+    "seed": 42,
+    "torch_seed": 42
+  },
+  "learners": [
+    "frozen",
+    "sccl",
+    "sccl_capprobe",
+    "sccl_capprobe_strat",
+    "sccl_capens",
+    "sccl_cap_anchor",
+    "sccl_capens_anchor"
+  ],
+  "out_dir": "runs/sccl_v6"
+}

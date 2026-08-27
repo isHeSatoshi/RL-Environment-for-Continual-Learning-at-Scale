@@ -412,17 +412,56 @@ class SelfCertVault(SkillVault):
                                      conf=conf, domain=domain, entry=entry,
                                      dedup_sim=0.0, kind="probe")
 
+    @staticmethod
+    def _cap_probe_source(task_id: str) -> str:
+        """Source skill of a cap probe ('<skill>:c<i>' -> '<skill>')."""
+        return task_id.rsplit(":c", 1)[0]
+
+    def _cap_pool_by_family(self, pool: int) -> Dict[str, List[Any]]:
+        """SCCL v6 (Branch D): cap_probe pool per family, ensemble-capable.
+
+        Within each family keep only the FRESHEST variant of each distinct
+        source skill (a family's skill axes), then keep the `pool` skills whose
+        freshest variant is newest by commit order (listed in commit order).
+        pool=1 reduces exactly to the v5b rule (newest cap_probe per family),
+        so v5b rows stay bit-identical. Deterministic: no RNG.
+        """
+        obj: Dict[str, Dict[str, Any]] = {}
+        last_idx: Dict[str, Dict[str, int]] = {}
+        for i, s in enumerate(self._skills):
+            if getattr(s, "kind", "") != "cap_probe":
+                continue
+            src = self._cap_probe_source(s.task_id)
+            obj.setdefault(s.family, {})[src] = s
+            last_idx.setdefault(s.family, {})[src] = i
+        out: Dict[str, List[Any]] = {}
+        for fam, by_src in obj.items():
+            srcs = sorted(by_src, key=lambda x: last_idx[fam][x])
+            out[fam] = [by_src[x] for x in srcs[-max(1, int(pool)):]]
+        return out
+
+    def _cap_pool_keep_ids(self, pool: int) -> set:
+        """Ids of the cap_probes to KEEP under an ensemble pool of size `pool`."""
+        return {id(s) for probes in self._cap_pool_by_family(pool).values()
+                for s in probes}
+
     def commit_cap_probe(self, task_id: str, family: str, spec: str, prompt: str,
                           code: str, self_tests: List[str], conf: float,
-                          domain: str = "code", entry: str = "") -> bool:
+                          domain: str = "code", entry: str = "",
+                          pool: int = 1) -> bool:
         """Admit a certified CAPABILITY probe (kind="cap_probe", SCCL v5b).
 
         A cap_probe is a certified variant of a family's capability that the
         model never trains on: numeric perturbation for math domains,
         paraphrase with fresh self-tests for code domains. The veto pool is
-        bounded by construction: only the NEWEST cap_probe of each family is
-        kept, so the gate always polices the freshest manufactured evidence of
-        that capability and the per-veto cost stays O(#families).
+        bounded by construction: with pool=1 only the NEWEST cap_probe of each
+        family is kept (v5b), so the gate polices the freshest manufactured
+        evidence of that capability at O(#families) per veto. SCCL v6
+        (Branch D): pool>1 keeps an ENSEMBLE of up to `pool` distinct
+        source-skill probes per family (freshest variant per skill), because
+        v5b telemetry showed a single newest-per-family probe witnesses only
+        ONE skill axis of a heterogeneous family and passed every update that
+        destroyed an unwitnessed axis.
         """
         ok = self.commit_certified(task_id=task_id, family=family, spec=spec,
                                    prompt=prompt, code=code, self_tests=self_tests,
@@ -430,13 +469,9 @@ class SelfCertVault(SkillVault):
                                    dedup_sim=0.0, kind="cap_probe")
         if not ok:
             return False
-        # keep only the newest cap_probe per family (list order = commit order)
-        newest: Dict[str, Any] = {}
-        for s in self._skills:
-            if getattr(s, "kind", "") == "cap_probe":
-                newest[s.family] = s
+        keep = self._cap_pool_keep_ids(pool)
         drop = [s for s in self._skills
-                if getattr(s, "kind", "") == "cap_probe" and newest.get(s.family) is not s]
+                if getattr(s, "kind", "") == "cap_probe" and id(s) not in keep]
         if drop:
             drop_ids = {id(s) for s in drop}
             self._skills = [s for s in self._skills if id(s) not in drop_ids]
@@ -512,7 +547,8 @@ class SelfCertVault(SkillVault):
                         check_skills: int = 3, n_samples: int = 2,
                         sample_temp: float = 0.7, check_probes: int = 0,
                         check_math: int = 0, stratified: bool = False,
-                        check_cap_probes: int = 0, cap_margin: int = 0) -> Dict[str, Any]:
+                        check_cap_probes: int = 0, cap_margin: int = 0,
+                        cap_pool: int = 1) -> Dict[str, Any]:
         """Self-Replay Veto (RRV) — the gold-free forgetting detector.
 
         For each recently committed self-certified skill, REGENERATE solutions
@@ -539,6 +575,12 @@ class SelfCertVault(SkillVault):
             instance-vs-capability gap that skill/probe replay cannot see.
             cap_margin>0 arms the bounded-damage guard: a probe that breaks
             gets extra regeneration attempts before it can veto.
+          * cap_pool>1 — SCCL v6 (Branch D): re-check an ENSEMBLE of up to
+            cap_pool distinct-source-skill probes per family instead of only
+            the newest. v5b telemetry showed one newest-per-family probe
+            witnesses a single skill axis of a heterogeneous family and passed
+            every update that destroyed an unwitnessed axis. cap_pool=1 (the
+            default) is exactly the v5b newest-per-family behaviour.
 
         Note we deliberately do NOT fall back to executing the stored code: that
         artifact trivially passes its own tests regardless of the model's state,
@@ -623,19 +665,20 @@ class SelfCertVault(SkillVault):
                 if not ok:
                     broke_math.append(s.task_id)
 
-        # 4) capability probes (SCCL v5b): newest certified variant PER FAMILY,
+        # 4) capability probes (SCCL v5b / v6): certified capability variants,
         # both domains. This stratum polices the instance-vs-capability gap:
         # memorized instances can keep passing their stored self-tests while
         # the capability the variants measure erodes inside accepted updates.
+        # v5b checks the newest probe per family; v6 (Branch D) checks an
+        # ENSEMBLE of up to cap_pool distinct-source-skill probes per family,
+        # because a heterogeneous family has multiple skill axes and one probe
+        # witnesses only one of them. cap_pool=1 == v5b (bit-identical).
         checked_cap = 0
         broke_cap: List[str] = []
         if check_cap_probes > 0:
-            caps: Dict[str, Any] = {}
-            for s in self._skills:
-                if getattr(s, "kind", "") == "cap_probe":
-                    caps[s.family] = s  # commit order => newest per family
+            caps = self._cap_pool_by_family(max(1, int(cap_pool)))
             for fam in sorted(caps):
-                s = caps[fam]
+              for s in caps[fam]:
                 if getattr(s, "domain", "code") == "math":
                     want = format_number(str(s.code))
                     checked_cap += 1

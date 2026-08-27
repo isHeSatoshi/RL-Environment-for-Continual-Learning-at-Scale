@@ -1544,3 +1544,174 @@ def test_v5b_default_config_is_inert():
     sig = inspect.signature(SelfCertVault.selfreplay_veto)
     assert sig.parameters["check_cap_probes"].default == 0
     assert sig.parameters["cap_margin"].default == 0
+
+
+# ---------------------------------------------------------------------------
+# SCCL v6 (Branch D): capability-probe ENSEMBLE pool.
+# The v5b telemetry (runs/sccl_v5b/telemetry_arith_erosion.json) measured 100%
+# probe insensitivity: every probe-checked arith erosion PASSED its single
+# newest-per-family cap probe. The cause is skill-heterogeneity blindness — a
+# heterogeneous family has MULTIPLE skill axes and one newest-per-family probe
+# witnesses only ONE axis, so an update that destroys an unwitnessed axis sails
+# through the gate. Branch D generalizes the pool to an ENSEMBLE of up to K
+# distinct-source-skill probes per family. These tests pin two guarantees:
+#   (a) K=1 reduces EXACTLY to the v5b newest-per-family rule (bit-identity, so
+#       the v5b determinism rows are untouched), and
+#   (b) K>1 keeps the freshest variant of K DISTINCT source skills and the veto
+#       re-checks ALL of them (any break -> veto).
+# ---------------------------------------------------------------------------
+
+def test_cap_probe_source_parse():
+    from gcl.vault import SelfCertVault
+    assert SelfCertVault._cap_probe_source("mbpp_604:c0") == "mbpp_604"
+    assert SelfCertVault._cap_probe_source("mbpp_604:c7") == "mbpp_604"
+    assert SelfCertVault._cap_probe_source("math_word_x:c1") == "math_word_x"
+    # a plain skill id (no ":c" suffix) is its own source
+    assert SelfCertVault._cap_probe_source("mbpp_604") == "mbpp_604"
+
+
+def test_cap_pool_pool1_is_v5b_newest_per_family():
+    """K=1 must reduce exactly to v5b: the single NEWEST cap_probe per family,
+    regardless of how many distinct source skills / variants are stored. This is
+    the bit-identity guarantee that keeps every v5b row reproducible."""
+    v = SelfCertVault()
+    # commit order: A:c0, B:c0, A:c1, C:c0, B:c1  (A,B,C distinct source skills)
+    for tid in ["A:c0", "B:c0", "A:c1", "C:c0", "B:c1"]:
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}", f"p-{tid}",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=99)
+    pool = v._cap_pool_by_family(1)
+    assert list(pool) == ["famA"]
+    assert [s.task_id for s in pool["famA"]] == ["B:c1"], \
+        "K=1 must select exactly the globally-newest cap_probe (v5b rule)"
+
+
+def test_cap_pool_ensemble_keeps_distinct_source_skills():
+    """K=3 keeps up to three DISTINCT source skills per family; a family with
+    only one source skill yields a one-probe pool even under K=3."""
+    v = SelfCertVault()
+    for tid in ["A:c0", "B:c0", "C:c0", "D:c0"]:
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}", f"p-{tid}",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=99)
+    pool = v._cap_pool_by_family(3)
+    ids = [s.task_id for s in pool["famA"]]
+    assert len(ids) == 3
+    # freshest-variant-per-skill then newest-by-commit => B,C,D (A is oldest)
+    assert ids == ["B:c0", "C:c0", "D:c0"], ids
+    assert len({SelfCertVault._cap_probe_source(t) for t in ids}) == 3, \
+        "ensemble must span DISTINCT source skills"
+    # single-skill family: K=3 still yields one probe (nothing to ensemble over)
+    v2 = SelfCertVault()
+    for tid in ["X:c0", "X:c1", "X:c2"]:
+        assert v2.commit_cap_probe(tid, "famB", f"spec {tid}", f"p-{tid}",
+                                   _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=99)
+    pool2 = v2._cap_pool_by_family(3)
+    assert [s.task_id for s in pool2["famB"]] == ["X:c2"], \
+        "multiple variants of ONE skill collapse to the freshest variant"
+
+
+def test_cap_pool_ensemble_freshest_variant_per_skill():
+    """Within a source skill only the FRESHEST variant is eligible, so the
+    ensemble witnesses each skill axis with its latest certified evidence."""
+    v = SelfCertVault()
+    for tid in ["A:c0", "B:c0", "A:c1", "A:c2"]:
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}", f"p-{tid}",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=99)
+    pool = v._cap_pool_by_family(3)
+    ids = [s.task_id for s in pool["famA"]]
+    assert "A:c2" in ids and "A:c0" not in ids and "A:c1" not in ids, \
+        f"only the freshest variant of A may appear, got {ids}"
+    assert ids == ["B:c0", "A:c2"], ids
+
+
+def test_commit_cap_probe_ensemble_prunes_to_k():
+    """commit_cap_probe(pool=K) must prune the family pool down to K distinct
+    source skills after every admission (bounded by construction)."""
+    v = SelfCertVault()
+    for tid in ["A:c0", "B:c0", "C:c0", "D:c0"]:
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}", f"p-{tid}",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=3)
+    caps = [s for s in v._skills if s.kind == "cap_probe"]
+    assert len(caps) == 3, "pool must be pruned to K=3 distinct skills"
+    assert {s.task_id for s in caps} == {"B:c0", "C:c0", "D:c0"}
+    # a fresh variant of an IN-POOL skill replaces it in place, no growth
+    assert v.commit_cap_probe("B:c1", "famA", "spec B:c1", "p-B:c1",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=3)
+    caps = [s for s in v._skills if s.kind == "cap_probe"]
+    assert len(caps) == 3
+    assert {s.task_id for s in caps} == {"B:c1", "C:c0", "D:c0"}
+
+
+class _PerPromptEngine:
+    """Regeneration engine whose code depends on a marker in the prompt, so a
+    test can break exactly one cap probe while the others pass."""
+
+    def __init__(self, break_marker=None):
+        self.break_marker = break_marker
+
+    def sample_candidates(self, prompt, n, temperature=0.7, top_p=0.95,
+                          adapter_on=True, max_new_tokens=None):
+        if self.break_marker and self.break_marker in prompt:
+            return ["```python\ndef add2(a, b):\n    return a - b\n```"] * max(1, n)
+        return ["```python\ndef add2(a, b):\n    return a + b\n```"] * max(1, n)
+
+
+def test_rrv_cap_ensemble_checks_all_and_vetoes_any_break():
+    """The ensemble stratum must re-check EVERY pooled probe (checked_cap == K)
+    and veto if ANY one breaks — this is the wider witness v5b lacked."""
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    for tid, marker in [("A:c0", "MA"), ("B:c0", "MB"), ("C:c0", "MC")]:
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}",
+                                  f"PROMPT {marker}\n```python\n",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=3)
+    # all probes regenerate correct code -> no veto, all three checked
+    eng = _PerPromptEngine(break_marker=None)
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=3)
+    assert not res["veto"] and res["checked_cap"] == 3, res
+    # break ONLY probe B -> veto names it, the other two still pass
+    eng = _PerPromptEngine(break_marker="MB")
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=3)
+    assert res["veto"] and res["broke_cap"] == ["B:c0"], res
+    assert res["checked_cap"] == 3, "all pooled probes must be re-checked"
+
+
+def test_rrv_cap_pool_default_is_v5b_single_probe():
+    """With cap_pool=1 (default) the veto checks only the newest probe per
+    family — the exact v5b stratum. checked_cap must equal #families, not K."""
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    # store 3 distinct skills but read the pool with the K=1 default
+    for tid, marker in [("A:c0", "MA"), ("B:c0", "MB"), ("C:c0", "MC")]:
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}",
+                                  f"PROMPT {marker}\n```python\n",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9, pool=99)
+    eng = _PerPromptEngine(break_marker=None)
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1)  # cap_pool defaults to 1
+    assert res["checked_cap"] == 1, \
+        "cap_pool=1 must check exactly one (newest) probe per family, v5b-style"
+    assert not res["veto"]
+
+
+def test_v6_default_config_is_inert():
+    """All v6 ensemble switches default to the v5b configuration (pool=1, no
+    per-learner overrides) so pre-v6 rows stay bit-identical."""
+    import inspect
+    from gcl.vault import SelfCertVault
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    assert cfg.sccl_capprobe_pool == 1
+    assert cfg.sccl_capprobe_pools == {}
+    sig = inspect.signature(SelfCertVault.selfreplay_veto)
+    assert sig.parameters["cap_pool"].default == 1
+    csig = inspect.signature(SelfCertVault.commit_cap_probe)
+    assert csig.parameters["pool"].default == 1
+
+
+def test_v6_learners_registered():
+    from gcl.learners.learners import (LEARNERS, SCCLLearner, SCCLCapEnsLearner,
+                                       SCCLCapAnchorLearner, SCCLCapEnsAnchorLearner)
+    assert LEARNERS["sccl_capens"] is SCCLCapEnsLearner
+    assert LEARNERS["sccl_cap_anchor"] is SCCLCapAnchorLearner
+    assert LEARNERS["sccl_capens_anchor"] is SCCLCapEnsAnchorLearner
+    for cls in (SCCLCapEnsLearner, SCCLCapAnchorLearner, SCCLCapEnsAnchorLearner):
+        assert issubclass(cls, SCCLLearner)
