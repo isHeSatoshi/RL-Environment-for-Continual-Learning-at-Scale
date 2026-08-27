@@ -287,6 +287,7 @@ class GroundedContinualEnv:
                 rf = 1.0  # pairs already selected above; pass them through as-is
         m = eng.apply_update(pairs, lr=lr, anchor_lambda=anch, replay_frac=rf,
                              replay_pairs=rp)
+        gate["anchor_lambda"] = anch  # v4 audit trail: persisted with the gate verdict
 
         if use_sccl:
             probe_learner = name in set(getattr(self.cfg, "sccl_probe_learners", []))

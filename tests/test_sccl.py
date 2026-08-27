@@ -1128,3 +1128,30 @@ def test_sccl_anchor_per_learner_lambda_map():
     env2.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
                      metadata={"sccl": _cert_meta(found=True)}))
     assert abs(eng2.last_update_kw["anchor_lambda"] - 0.1) < 1e-9
+
+
+def test_v4_ladder_learners_are_registered_and_isolated():
+    """Every learner named in the v4 configs must exist in the LEARNERS registry
+    (experiment.py silently skips unregistered names — the anchor rows would
+    otherwise never run), and the anchor rows must be SCCL learners so they ride
+    the gold-free self-cert path."""
+    import json, glob
+    from gcl.learners.learners import (LEARNERS, SCCLLearner,
+                                       SCCLAnchorLoLearner, SCCLAnchorHiLearner)
+    for path in glob.glob(os.path.join(os.path.dirname(__file__), "..", "configs", "*.json")):
+        try:
+            cfg = json.load(open(path))
+        except Exception:
+            continue  # legacy/commented files the runner never loads
+        for name in cfg.get("learners", []):
+            assert name in LEARNERS, f"{os.path.basename(path)}: learner '{name}' not in LEARNERS (would be silently skipped)"
+    # anchor rows are SCCL subclasses (gold-free self-cert + RRV gate)
+    assert issubclass(SCCLAnchorLoLearner, SCCLLearner)
+    assert issubclass(SCCLAnchorHiLearner, SCCLLearner)
+    assert LEARNERS["sccl_anchor_lo"] is SCCLAnchorLoLearner
+    assert LEARNERS["sccl_anchor_hi"] is SCCLAnchorHiLearner
+    # anchor rows must be listed in sccl_learners (so the vault/certifier is wired)
+    v4 = json.load(open(os.path.join(os.path.dirname(__file__), "..", "configs", "sccl_v4.json")))
+    for name in ("sccl_anchor_lo", "sccl_anchor_hi"):
+        assert name in v4["experiment"]["sccl_learners"], f"{name} missing from sccl_learners"
+        assert name in v4["experiment"]["sccl_anchor_learners"], f"{name} missing from sccl_anchor_learners"

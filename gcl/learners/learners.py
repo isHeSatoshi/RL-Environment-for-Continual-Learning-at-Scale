@@ -297,11 +297,29 @@ class SCCLNbhdLearner(SCCLLearner):
     name = "sccl_n"
 
 
+class SCCLAnchorLoLearner(SCCLLearner):
+    """SCCL v4 ablation row: in-update base anchor at low strength. The anchor
+    is a quadratic pull of LoRA params toward LoRA init (= frozen base) applied
+    inside each accepted update; it is decision-independent (never touches the
+    accept/reject verdict) and gold-free (target = the model's own init).
+    Strength comes from cfg.sccl_anchor_lambdas / sccl_anchor_lambda via
+    cfg.sccl_anchor_learners; this class only supplies the registry name."""
+    name = "sccl_anchor_lo"
+
+
+class SCCLAnchorHiLearner(SCCLLearner):
+    """SCCL v4 ablation row: in-update base anchor at high strength. Same
+    mechanism and wiring as SCCLAnchorLoLearner; the ladder A/Bs λ within one
+    run."""
+    name = "sccl_anchor_hi"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
                                  SelfDistillLearner, ExecFilterLearner,
                                  SCCLLearner, SCCLNoGateLearner, SCCLNoConsLearner,
                                  SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner,
-                                 SCCLProbePromoteLearner, SCCLNbhdLearner)}
+                                 SCCLProbePromoteLearner, SCCLNbhdLearner,
+                                 SCCLAnchorLoLearner, SCCLAnchorHiLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

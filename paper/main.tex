@@ -309,6 +309,6 @@ python -m gcl.report --aggregate runs/sccl_v3_seeds --out paper/results_v3.tex -
 python -m gcl.runner --config configs/sccl_v4.json   # v4 base-anchor ladder (seeded)
 python -m pytest tests/test_sccl.py   # gold-free proof suite
 \end{lstlisting}
-Gold-freeness is checked by 60 tests: AST audits of \texttt{selfcert.py} (covering the probe-manufacture and neighborhood-check APIs), signature inspection, certification semantics under real sandbox execution, poisoned-gold adversarial environments, bidirectional probe cross-validation, certified-rehearsal mixing, admission-time neighborhood certification (open/closed decision policy), RRV rollback behavior across skills, probes, and math entries, and the v4 base anchor (per-learner engagement, ladder isolation, decision-independence, and per-learner $\lambda$ override).
+Gold-freeness is checked by 61 tests: AST audits of \texttt{selfcert.py} (covering the probe-manufacture and neighborhood-check APIs), signature inspection, certification semantics under real sandbox execution, poisoned-gold adversarial environments, bidirectional probe cross-validation, certified-rehearsal mixing, admission-time neighborhood certification (open/closed decision policy), RRV rollback behavior across skills, probes, and math entries, and the v4 base anchor (per-learner engagement, ladder isolation, decision-independence, per-learner $\lambda$ override, and config-vs-learner-registry consistency so ladder rows cannot be silently skipped).
 
 \end{document}
