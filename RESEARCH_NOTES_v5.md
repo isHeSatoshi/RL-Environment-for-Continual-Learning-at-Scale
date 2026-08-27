@@ -141,6 +141,11 @@ alone as the gate-side fix.
 
 ## v4 VERDICT (seed-42 ladder, runs/sccl_v4) — recorded 2026-08-27
 
+> **RETRACTED 2026-08-27 (same day).** The anchor penalty never engaged: a PEFT
+> key mismatch made it a silent no-op in every v4/v5 run. F1/F2 below are seed
+> artifacts, not anchor effects. See ADDENDUM at the bottom of this file. The
+> table is kept as the raw record of what was observed.
+
 Pre-registered rule: success = anchor row arith_holdout > sccl AND frontier >=
 sccl.frontier - 0.02. Result: BOTH anchor rows FAIL on arith.
 
@@ -201,3 +206,79 @@ Decision rule:
 - If neither lifts arith: (G) generalization gap dominates -> targeted subspace
   protection (Fisher-weighted anchor on arith directions / gradient
   projection), still gold-free. Record as informative negative result.
+
+## ADDENDUM 2026-08-27: the anchor no-op bug (v4 verdict RETRACTED)
+
+**The bug.** `TrainingEngine._base_anchor()` snapshotted the adapter via
+`get_peft_model_state_dict()`, whose keys strip the adapter segment
+(`...lora_A.weight`), while the penalty loop in `apply_update` matches
+`named_parameters()` names (`...lora_A.default.weight`). The intersection is
+empty, so `n in base_anchor` was never true and `anch_pen` stayed 0.0 — the
+anchor was a silent no-op in EVERY run that used it (v4 anchor_lo/hi, the v5
+anchor axis, and historically vsr_bounded). Confirmed on CPU with
+`scripts/_probe_anchor_keys.py`: 0 of 4 keys match. The v4 "engagement audit"
+(gate["anchor_lambda"] = 0.1/0.5 on every update) passed because it audited the
+CONFIG WIRING (lambda plumbed into apply_update), not the penalty's effect.
+
+**The tell.** v5's `sccl_anchor_lo` (learner index 3 -> torch seed 45) landed
+bit-identical to v3's torch_seed-44 `sccl` run (which draws 45) on every
+metric — ACC, BWT, forgetting, AUC, frontier, updates/rollbacks, all of them.
+Same for v4: `anchor_lo` (draws seed 44) == v3 torch_seed-43 `sccl`
+(0.6875/+0.20729166666666665/16/0, exact float match), `anchor_hi` (seed 45)
+== v3 torch_seed-44 `sccl` (0.525/+0.045/14/4). An anchor at lambda=0.1
+producing a bitwise copy of plain sccl at the same effective seed is not a
+small effect — it is zero effect.
+
+**Consequences.**
+1. v4 findings F1 ("lambda=0.1 buys plasticity, best arm ever") and F2
+   ("lambda=0.5 hurts") are RETRACTED as anchor claims. The v4 ladder is
+   actually three plain-sccl seeds in disguise: seed 42 -> 0.575, seed 43 ->
+   0.688, seed 44 -> 0.525. Its real (unintended) contribution is a direct
+   measurement of seed variance: ACC spans 0.525-0.688 across seeds at fixed
+   config. Single-seed arm comparisons in this regime are uninterpretable.
+2. The v5 ladder in flight (runs/sccl_v5) has an INERT anchor axis:
+   sccl_anchor_lo@45 is a third sccl seed; sccl_anchor_strat@46 is a second
+   sccl_strat seed (stratified veto active, anchor contributing nothing). Its
+   valid novel cells: sccl_strat@44 (done: ACC 0.700, BWT +0.220, arith 0.200
+   -> H1 arith endpoint FAILS even though the stratified veto demonstrably
+   kept arith skills under gate coverage: 4 vetoes, all breaking mbpp_388 in
+   string/drift phases) and vsr_nogold@47 (pending).
+3. H1's failure mode refines the diagnosis: the stratified pool CAUGHT
+   cross-family damage (every veto names an arith skill) yet arith holdout
+   still collapsed — because the damage accrues INSIDE accepted updates
+   (gold telemetry: arith probe 0.6 -> 0.2-0.4 within accepted updates).
+   The gate checks certified INSTANCES; the holdout measures general
+   CAPABILITY. The instance-vs-capability gap (G) is now the primary target.
+
+**The fix (commit e53923a).** `_base_anchor()` now snapshots from
+`self.model.named_parameters()` (requires_grad only), matching the penalty
+loop's iteration exactly. Two new engine-level tests guard engagement, both
+FAIL on the pre-fix code and pass on the fix:
+- `test_anchor_base_keys_match_named_parameters`: key-set agreement.
+- `test_anchor_actually_pulls_weights_toward_base`: with identical seed/data/
+  init, anchored distance-to-init < unanchored (lambda 5.0 vs 0.0).
+Full suite: 270 passed. The non-anchor code path is untouched (anchor snapshot
+is only taken when anchor_lambda > 0), so all non-anchor rows remain
+bit-reproducible — verifiable in the corrected rerun.
+
+**Revised plan.**
+- Let runs/sccl_v5 finish. Treat it as: sccl@43, sccl_strat@44,
+  sccl_strat@46 (as anchor_strat), sccl@45 (as anchor_lo), vsr_nogold@47 —
+  i.e., seed-variance data for sccl {42,43,45} and sccl_strat {44,46}.
+- Launch the CORRECTED 2x2 factorial (configs/sccl_v5_fixed.json ->
+  runs/sccl_v5_fixed, same seed map, fixed engine). Determinism check built
+  in: frozen/sccl/sccl_strat/vsr_nogold rows must bit-reproduce the inert
+  ladder; the anchor rows are the first REAL anchor measurements.
+- Pre-registered interpretation of the corrected factorial stands as written
+  above (H1/H2/BREAKTHROUGH rule), now measuring what it claims to measure.
+- If arith still fails with a genuinely engaged anchor + stratified coverage:
+  Branch C confirmed -> v5b capability probes (self-generated numeric variants
+  of certified skills, certified by majority vote, added to the stratified
+  pool). Gold-free throughout.
+
+**Meta-lesson for the paper.** A regularizer's audit trail must verify EFFECT
+(penalty > 0, weights pulled), not just configuration. This bug survived v4
+because the plausible seed-confounded story (F1/F2) was never checked against
+the seed-matched controls that already existed in runs/sccl_v3_seeds. The
+correction strengthens the paper: the trilemma result, if it survives the
+corrected factorial, rests on an engagement-tested mechanism.

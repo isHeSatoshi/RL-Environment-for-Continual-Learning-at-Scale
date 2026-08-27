@@ -1,0 +1,118 @@
+{
+  "_comment": "SCCL v5 CORRECTED 2x2 FACTORIAL rerun (anchor x stratified coverage) with the ENGAGED base anchor. Identical design to configs/sccl_v5.json except out_dir and this comment; equivalence is test-enforced (test_v5_fixed_config_is_same_design). The first flight (runs/sccl_v5) launched before commit e53923a fixed the anchor no-op (PEFT key mismatch: get_peft_model_state_dict keys vs named_parameters names -> penalty matched zero parameters), so ITS anchor cells are inert (sccl_anchor_lo == sccl@seed45, sccl_anchor_strat == sccl_strat@seed46, bit-identical; see RESEARCH_NOTES_v5.md ADDENDUM). This rerun produces the first REAL anchor measurements. Determinism check across the engine fix: frozen/sccl/sccl_strat/vsr_nogold rows must bit-reproduce runs/sccl_v5 (non-anchor code path unchanged). Same stream hash 554ce43f182b, torch_seed=42, seed=42+learner index. Gold-free throughout. BREAKTHROUGH rule unchanged: sccl_anchor_strat arith >= 0.55 AND frontier >= sccl.frontier - 0.02 -> multi-seed (43,44) before headline claim.",
+  "stream": {
+    "seed": 42,
+    "families": [
+      {
+        "corpus": "mbpp",
+        "name": "arith",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "math",
+        "name": "math_word",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "mbpp",
+        "name": "string",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 12
+      },
+      {
+        "corpus": "mbpp",
+        "name": "drift",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 24,
+        "drift": {
+          "kind": "spec_perturb"
+        }
+      }
+    ]
+  },
+  "experiment": {
+    "model_name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "learning_rate": 0.0003,
+    "train_steps_per_update": 4,
+    "max_updates": 60,
+    "temperature": 0.1,
+    "max_new_tokens": 256,
+    "gate_epsilon": 0.05,
+    "holdout_size": 8,
+    "use_vsr_gate": true,
+    "use_reference_injection": true,
+    "vsr_learners": [
+      "vsr"
+    ],
+    "refinject_learners": [
+      "vsr"
+    ],
+    "vault_commit_min": 0.9,
+    "vault_retrieve_k": 3,
+    "vault_gate_check": 3,
+    "sccl_learners": [
+      "sccl",
+      "sccl_strat",
+      "sccl_anchor_lo",
+      "sccl_anchor_strat"
+    ],
+    "sccl_nogate_learners": [],
+    "sccl_nocons_learners": [],
+    "sccl_k": 6,
+    "sccl_temp": 0.8,
+    "sccl_test_bags": 2,
+    "sccl_tests_per_bag": 4,
+    "sccl_tau": 0.65,
+    "sccl_tau_math": 0.6,
+    "sccl_derive_entry": true,
+    "sccl_replay_check": 3,
+    "sccl_replay_samples": 2,
+    "sccl_gate_probe": 4,
+    "sccl_replay_learners": [],
+    "sccl_replay_k": 0,
+    "sccl_probe_learners": [],
+    "sccl_probes": 0,
+    "sccl_probe_check": 0,
+    "sccl_rrv_math": 0,
+    "sccl_probe_promote_learners": [],
+    "sccl_probe_promote_age": 0,
+    "sccl_nbhd_learners": [],
+    "sccl_nbhd_tests": 0,
+    "sccl_anchor_learners": [
+      "sccl_anchor_lo",
+      "sccl_anchor_strat"
+    ],
+    "sccl_anchor_lambda": 0.1,
+    "sccl_anchor_lambdas": {
+      "sccl_anchor_lo": 0.1,
+      "sccl_anchor_strat": 0.1
+    },
+    "sccl_stratified_learners": [
+      "sccl_strat",
+      "sccl_anchor_strat"
+    ],
+    "self_taught_learners": [
+      "vsr_nogold"
+    ],
+    "out_dir": "runs/sccl_v5_fixed",
+    "seed": 42,
+    "torch_seed": 42
+  },
+  "learners": [
+    "frozen",
+    "sccl",
+    "sccl_strat",
+    "sccl_anchor_lo",
+    "sccl_anchor_strat",
+    "vsr_nogold"
+  ],
+  "out_dir": "runs/sccl_v5_fixed"
+}

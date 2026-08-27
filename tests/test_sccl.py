@@ -1222,6 +1222,23 @@ def test_v5_strat_learner_registered_and_wired():
                               "sccl_anchor_strat", "vsr_nogold"]
 
 
+def test_v5_fixed_config_is_same_design():
+    """configs/sccl_v5_fixed.json is the corrected rerun of the v5 factorial
+    after the anchor no-op fix (e53923a). It must be the IDENTICAL design —
+    same stream, seeds, learners, gate wiring — differing only in _comment and
+    out_dir, so its rows are directly comparable to the first flight and the
+    non-anchor rows double as the determinism check across the engine fix."""
+    import json
+    cfgs = os.path.join(os.path.dirname(__file__), "..", "configs")
+    a = json.load(open(os.path.join(cfgs, "sccl_v5.json")))
+    b = json.load(open(os.path.join(cfgs, "sccl_v5_fixed.json")))
+    assert [k for k in a if a[k] != b[k]] == ["_comment", "experiment", "out_dir"]
+    ea, eb = a["experiment"], b["experiment"]
+    assert [k for k in ea if ea[k] != eb[k]] == ["out_dir"]
+    assert b["out_dir"] == "runs/sccl_v5_fixed"
+    assert b["experiment"]["out_dir"] == "runs/sccl_v5_fixed"
+
+
 # ---------------------------------------------------------------------------
 # SCCL v4/v5 base anchor — ENGINE-LEVEL engagement tests.
 # The original v4 tests only checked config wiring and the audit trail, and a

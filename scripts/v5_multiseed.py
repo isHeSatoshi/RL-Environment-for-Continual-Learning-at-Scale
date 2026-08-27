@@ -6,16 +6,22 @@ the composition must be confirmed at seeds 43/44 BEFORE any headline claim —
 same protocol as v3 (seeded per learner as torch_seed + learner index, so a
 learner at the same position draws the same relative seed across runs).
 
+Targets the CORRECTED factorial (configs/sccl_v5_fixed.json ->
+runs/sccl_v5_fixed), flown with the engagement-tested anchor of commit
+e53923a. The FIRST flight (configs/sccl_v5.json -> runs/sccl_v5) launched
+before the anchor no-op fix, so its anchor cells are inert and it must NOT be
+multi-seeded (see RESEARCH_NOTES_v5.md ADDENDUM).
+
 This script:
-  1. snapshots the completed seed-42 ladder (runs/sccl_v5) to
-     runs/sccl_v5_s42 so all three seeds share one directory layout;
+  1. snapshots the completed seed-42 ladder (runs/sccl_v5_fixed) to
+     runs/sccl_v5_fixed_s42 so all three seeds share one directory layout;
   2. runs the identical ladder at torch_seed 43 and 44 via run_seeds.py
      (sequential subprocesses, fresh GPU state per seed, logs in
-     runs/sccl_v5_s{43,44}_log.txt);
-  3. re-aggregates all three seeds into runs/sccl_v5_seeds/aggregate.json
+     runs/sccl_v5_fixed_s{43,44}_log.txt);
+  3. re-aggregates all three seeds into runs/sccl_v5_fixed_seeds/aggregate.json
      under the usual rails (single stream hash, clean canaries).
 
-Run only AFTER runs/sccl_v5/metrics.json is final (watcher verdict written).
+Run only AFTER runs/sccl_v5_fixed/metrics.json is final.
 Launch convention (Windows): TMPDIR/TEMP/TMP -> /d/gcl_tmp.
 """
 from __future__ import annotations
@@ -26,9 +32,9 @@ import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG = os.path.join(REPO, "configs", "sccl_v5.json")
-S42_SRC = os.path.join(REPO, "runs", "sccl_v5")
-S42_DST = os.path.join(REPO, "runs", "sccl_v5_s42")
+CONFIG = os.path.join(REPO, "configs", "sccl_v5_fixed.json")
+S42_SRC = os.path.join(REPO, "runs", "sccl_v5_fixed")
+S42_DST = os.path.join(REPO, "runs", "sccl_v5_fixed_s42")
 
 
 def main() -> None:
