@@ -50,7 +50,18 @@ should reproduce v3's (determinism cross-check).
 
 ## Status
 
-- Implemented + unit tested (4 anchor tests, full test_sccl.py 60 passed). Committed daa9fde
-  (mechanism) + 31cfe38 (audit trail + smoke config configs/_smoke_v4.json).
-- Paper v4 method subsection drafted (mechanism prose, results-independent). Committed 2c2fb2c.
-- Next: smoke-test anchor wiring on real engine, then launch seeded v4 ladder.
+- Implemented + unit tested (4 anchor tests + config-vs-registry consistency test; full
+  suite 61 passed). Committed daa9fde (mechanism) + 31cfe38 (audit trail + smoke config).
+- BUG FOUND & FIXED (commit 7a8a779): sccl_anchor_lo/hi were NOT in the LEARNERS registry,
+  so experiment.py silently skipped them (first smoke ran 1/2 learners). Root cause: unit
+  tests exercise the env, never the registry. Fix: SCCLAnchorLo/HiLearner registered;
+  regression test asserts every learner named in any config/*.json exists in LEARNERS.
+  Also: anchor_lambda now persisted into the gate dict (registry.json audit trail).
+- Real-engine smoke (configs/_smoke_v4.json) VERIFIED: sccl gate entries anchor_lambda=0.0,
+  sccl_anchor_lo entries anchor_lambda=0.1 — engagement + isolation confirmed on GPU.
+- Seeded v4 ladder LAUNCHED 2026-08-27 ~14:55 (runs/sccl_v4, torch_seed=42). Determinism
+  cross-checks built in: sccl at idx1 (seed 43) should reproduce v3 seed-42's sccl row;
+  vsr_nogold at idx4 (seed 46) should reproduce v3's. Frozen already bit-identical
+  (0.613/0.025/+0.5875).
+- Watcher: scripts/wait_and_analyze_v4.py — waits for completion, then evaluates the
+  pre-registered rule and writes runs/sccl_v4_verdict.md.
