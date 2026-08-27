@@ -3,11 +3,13 @@
 **Status: Real Platform with Verified, Reproducible Continual Learning** — *Not a mock framework or production shell.*  
 A single GPU (e.g., RTX 4060 Ti 16GB or Kaggle T4) runs the entire pipeline: real PyTorch/PEFT LoRA weight updates, execution-grounded rewards, safe-gated model promotion, and measurable catastrophic forgetting — with every claim verifiable from logged execution artifacts.
 
-**New: Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a 54-test proof suite including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`).
+**New: Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a 60-test proof suite including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`).
 
 **SCCL v2 — self-manufactured stability.** A fine-grained diagnosis of v1 showed its residual forgetting is almost entirely *unvisited-generalization* loss (trained tasks retained, same-family holdouts collapse; math entries never gate-checked). v2 adds three gold-free mechanisms (`configs/sccl_v2.json`): **certified rehearsal** (every update also trains on stride-sampled pairs from the self-certified vault), **neighborhood probes** (at certification the model manufactures a certified spec variant — paraphrase + bidirectional cross-validation for code, numeric variant + majority vote for math — stored as `kind="probe"`, never trained on, re-checked by RRV so the gate protects a generalization neighborhood), and **math-RRV** (the veto extended to math vault entries via canonical-form answer matching). Probe manufacture is a spec-only API (`MakeProbe(engine, verifier, spec, domain, CertResult)`) covered by the same AST/signature/poisoned-gold audits.
 
 **SCCL v3 — neighborhood certification at admission.** The v2 rerun showed gate-side neighborhood checks achieve the lowest forgetting among gold-free rows but at a plasticity price: more vetoes, fewer accepted updates, lower accuracy. v3 moves the neighborhood check *upstream of the gradient*: `CheckNbhd(engine, verifier, spec, domain, CertResult)` manufactures a spec variant (paraphrase + fresh self-tests for code; numeric variant + majority vote for math) and requires the certified winner to pass it *before* the target may train. The decision policy is evidence-based and asymmetric: evidence that cannot be manufactured admits (open decision); manufactured evidence of fragility rejects (closed decision). `sccl_n` isolates the mechanism; `sccl_promote` keeps the probe-curriculum variant (probes that survive enough RRV checks graduate into certified rehearsal pairs). Ladder: `configs/sccl_v3.json`.
+
+**SCCL v4 — in-update base anchoring.** v1–v3 are all *gates*: they decide which updates are safe to keep. But the RRV gate only checks the *certified* vault skills; the base model's *uncertified* general capability (e.g. arithmetic generalization on never-trained holdout tasks) is never in the vault, so no accept/reject verdict defends it. On the seeded v3 ladder, every learning row — gold-free and gold-verified alike — collapses the arithmetic holdout while frozen holds it, because that damage is inflicted *inside* an accepted update. v4 therefore acts on the update itself: each LoRA update adds a quadratic pull of the trainable parameters toward their value at LoRA initialization (= the frozen base model). The anchor is gold-free (the target is the model's own initialization, no labels) and decision-independent (it changes how an accepted update moves weights, never which updates are accepted); its strength is logged per update for post-hoc audit. Applied per learner so it can be A/B'd, with a λ ablation in one run. Ladder: `configs/sccl_v4.json` (`frozen`, `sccl`, `sccl_anchor_lo`, `sccl_anchor_hi`, `vsr_nogold`).
 
 **Seeded protocol.** Pre-v3 runs were unseeded; the identical configuration scored ACC 0.637 and 0.744 in two runs (variance concentrates in arithmetic-holdout generalization while math acquisition is robust). Set `torch_seed` (>0) in the experiment config to seed torch/CUDA/numpy/Python RNG per learner, and use `python scripts/run_seeds.py --config <cfg> --seeds 42,43,44` for multi-seed ladders — the aggregator refuses to report mean±std unless all seeds walked the same clean stream.
 
@@ -183,6 +185,14 @@ SCCL v3 ladder (seeded; admission-time neighborhood certification):
 python -m gcl.runner --config configs/sccl_v3.json
 # multi-seed version with mean±std aggregation:
 python scripts/run_seeds.py --config configs/sccl_v3.json --seeds 42,43,44
+```
+
+SCCL v4 ladder (seeded; in-update base anchoring with a λ ablation):
+
+```bash
+python -m gcl.runner --config configs/sccl_v4.json
+# quick wiring smoke test on 2 families x 2 tasks (never used for results):
+python -m gcl.runner --config configs/_smoke_v4.json
 ```
 
 Gold-free proof suite (AST audits, poisoned-gold adversarial tests, certification semantics):

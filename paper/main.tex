@@ -306,6 +306,6 @@ python -m gcl.runner --config configs/sccl_v3.json   # seeded (torch_seed=42)
 python scripts/run_seeds.py --config <cfg> --seeds 42,7,123  # multi-seed
 python -m pytest tests/test_sccl.py   # gold-free proof suite
 \end{lstlisting}
-Gold-freeness is checked by 54 tests: AST audits of \texttt{selfcert.py} (covering the probe-manufacture and neighborhood-check APIs), signature inspection, certification semantics under real sandbox execution, poisoned-gold adversarial environments, bidirectional probe cross-validation, certified-rehearsal mixing, admission-time neighborhood certification (open/closed decision policy), and RRV rollback behavior across skills, probes, and math entries.
+Gold-freeness is checked by 60 tests: AST audits of \texttt{selfcert.py} (covering the probe-manufacture and neighborhood-check APIs), signature inspection, certification semantics under real sandbox execution, poisoned-gold adversarial environments, bidirectional probe cross-validation, certified-rehearsal mixing, admission-time neighborhood certification (open/closed decision policy), RRV rollback behavior across skills, probes, and math entries, and the v4 base anchor (per-learner engagement, ladder isolation, decision-independence, and per-learner $\lambda$ override).
 
 \end{document}
