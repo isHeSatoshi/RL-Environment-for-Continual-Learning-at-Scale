@@ -295,3 +295,35 @@ because the plausible seed-confounded story (F1/F2) was never checked against
 the seed-matched controls that already existed in runs/sccl_v3_seeds. The
 correction strengthens the paper: the trilemma result, if it survives the
 corrected factorial, rests on an engagement-tested mechanism.
+
+## v5b DESIGN DRAFT — capability probes (Branch C; implement only if the
+## corrected factorial still fails the arith endpoint)
+
+Diagnosis (now quantified on sccl_strat@44): 11/14 accepted updates degraded
+the arith gold probe; 2 degradations occurred INSIDE the arith phase itself.
+Memorized instances pass their stored self-tests while the capability the
+holdout measures erodes. No pool policy over memorized instances closes this.
+
+Mechanism (all gold-free):
+1. At certification of an arith-family skill, additionally manufacture K=2
+   CAPABILITY VARIANTS: numeric perturbations of the task's constants
+   (reuse CheckNbhd's numeric-variant machinery from v3), each with self-tests
+   derived from the VARIANT spec, certified by majority vote (tau_math-style).
+   Variants that fail certification are discarded (never used).
+2. Store certified variants in the vault as kind="cap_probe", family = parent
+   family, never trained on (like v2 probes).
+3. Stratified veto extension: the per-family check pool includes the newest
+   cap_probe of each family alongside the newest skill (so an arith update is
+   vetted iff it breaks arith GENERALIZATION, not just the memorized instance).
+   Deterministic selection; veto rule unchanged (ANY of n_samples passes ->
+   retained).
+4. Bounded-damage guard (pre-registered Branch B tie-break): if cap_probe
+   vetoes exceed a budget (>=50% of updates in a phase vetoed), fall back to
+   margin re-check (2 extra regenerations) before veto.
+
+Predictions:
+- If (G) dominates: cap_probe vetoes fire INSIDE family phases (including
+  arith-on-arith), arith-holdout stabilizes near frozen 0.6, plasticity cost
+  measurable in updates-accepted and ACC.
+- Pre-registered success: arith >= 0.55 AND frontier >= sccl - 0.02, then
+  multi-seed.
