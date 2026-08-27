@@ -1,0 +1,114 @@
+{
+  "_comment": "SCCL v5b: CAPABILITY PROBES (Branch C of RESEARCH_NOTES_v5.md). Motivation: the v5 corrected factorial showed accepted updates whose stored instance-level self-tests still pass while the underlying CAPABILITY degrades (instance-vs-capability gap; e.g. sccl_strat@44 arith). v5b manufactures one capability probe per certification (numeric/paraphrase variant with fresh self-tests via SelfCertifier.make_probe), stores them in the vault (kind=cap_probe, newest-per-family bounded pool), and adds a gold-free RRV stratum that re-checks them before every accepted update. Bounded-damage guard: if >= 50% of a family phase's vetoes are cap-vetoes, the guard arms cap_margin=2 extra regeneration retries before vetoing, so a single noisy probe cannot stall learning. All switches default OFF; frozen and sccl rows must bit-reproduce runs/sccl_v5_fixed (seeds 42/43 unchanged) as the inertness + determinism check. Same stream hash 554ce43f182b, torch_seed=42, seed=42+learner index. Gold-free throughout (gold only final eval/telemetry). Pre-registered success: sccl_capprobe_strat arith >= 0.55 AND frontier >= sccl.frontier - 0.02 -> multi-seed before any headline claim. Pre-registered prediction: if capability loss dominates, vetoes fire inside family phases and arith stabilizes near frozen 0.6 with a measurable plasticity cost.",
+  "stream": {
+    "seed": 42,
+    "families": [
+      {
+        "corpus": "mbpp",
+        "name": "arith",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "math",
+        "name": "math_word",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "mbpp",
+        "name": "string",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 12
+      },
+      {
+        "corpus": "mbpp",
+        "name": "drift",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 24,
+        "drift": {
+          "kind": "spec_perturb"
+        }
+      }
+    ]
+  },
+  "experiment": {
+    "model_name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "learning_rate": 0.0003,
+    "train_steps_per_update": 4,
+    "max_updates": 60,
+    "temperature": 0.1,
+    "max_new_tokens": 256,
+    "gate_epsilon": 0.05,
+    "holdout_size": 8,
+    "use_vsr_gate": true,
+    "use_reference_injection": true,
+    "vsr_learners": [
+      "vsr"
+    ],
+    "refinject_learners": [
+      "vsr"
+    ],
+    "vault_commit_min": 0.9,
+    "vault_retrieve_k": 3,
+    "vault_gate_check": 3,
+    "sccl_learners": [
+      "sccl",
+      "sccl_capprobe",
+      "sccl_capprobe_strat"
+    ],
+    "sccl_nogate_learners": [],
+    "sccl_nocons_learners": [],
+    "sccl_k": 6,
+    "sccl_temp": 0.8,
+    "sccl_test_bags": 2,
+    "sccl_tests_per_bag": 4,
+    "sccl_tau": 0.65,
+    "sccl_tau_math": 0.6,
+    "sccl_derive_entry": true,
+    "sccl_replay_check": 3,
+    "sccl_replay_samples": 2,
+    "sccl_gate_probe": 4,
+    "sccl_replay_learners": [],
+    "sccl_replay_k": 0,
+    "sccl_probe_learners": [],
+    "sccl_probes": 0,
+    "sccl_probe_check": 0,
+    "sccl_rrv_math": 0,
+    "sccl_probe_promote_learners": [],
+    "sccl_probe_promote_age": 0,
+    "sccl_nbhd_learners": [],
+    "sccl_nbhd_tests": 0,
+    "sccl_anchor_learners": [],
+    "sccl_anchor_lambda": 0.0,
+    "sccl_anchor_lambdas": {},
+    "sccl_stratified_learners": [
+      "sccl_capprobe_strat"
+    ],
+    "sccl_capprobe_learners": [
+      "sccl_capprobe",
+      "sccl_capprobe_strat"
+    ],
+    "sccl_capprobes": 1,
+    "sccl_capprobe_check": 4,
+    "sccl_capprobe_budget": 0.5,
+    "sccl_capprobe_margin": 2,
+    "self_taught_learners": [],
+    "out_dir": "runs/sccl_v5b",
+    "seed": 42,
+    "torch_seed": 42
+  },
+  "learners": [
+    "frozen",
+    "sccl",
+    "sccl_capprobe",
+    "sccl_capprobe_strat"
+  ],
+  "out_dir": "runs/sccl_v5b"
+}
