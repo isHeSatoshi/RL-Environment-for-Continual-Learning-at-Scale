@@ -1334,3 +1334,175 @@ def test_v5_veto_default_path_unchanged():
         "stratified must default to False (pre-v5 determinism)"
     src = inspect.getsource(SelfCertVault.selfreplay_veto)
     assert "skills[-check_skills:]" in src, "recency window must remain the default pool"
+
+
+# ---------------------------------------------------------------------------
+# SCCL v5b: capability probes (instance-vs-capability gap, gold-free)
+# ---------------------------------------------------------------------------
+
+_CAP_CODE = "def add2(a, b):\n    return a + b"
+_CAP_TESTS_VARIANT = ["assert add2(5, 5) == 10", "assert add2(-3, 3) == 0"]
+
+
+def test_commit_cap_probe_keeps_newest_per_family():
+    v = SelfCertVault()
+    assert v.commit_cap_probe("t1:c0", "famA", "spec A v1", "p1", _CAP_CODE,
+                              _CAP_TESTS_VARIANT, 0.9)
+    assert v.commit_cap_probe("t2:c0", "famA", "spec A v2", "p2", _CAP_CODE,
+                              _CAP_TESTS_VARIANT, 0.9)
+    assert v.commit_cap_probe("t3:c0", "famB", "spec B v1", "p3", _CAP_CODE,
+                              _CAP_TESTS_VARIANT, 0.9)
+    caps = [s for s in v._skills if s.kind == "cap_probe"]
+    assert len(caps) == 2, "pool must keep only the newest cap_probe per family"
+    by_fam = {s.family: s.task_id for s in caps}
+    assert by_fam == {"famA": "t2:c0", "famB": "t3:c0"}, by_fam
+    # ordinary skills must be untouched by the replacement pass
+    v.commit_certified("t4", "famA", "plain skill", "p4", _CERT_CODE, _CERT_TESTS, 0.9)
+    caps = [s for s in v._skills if s.kind == "cap_probe"]
+    assert len(caps) == 2 and any(s.task_id == "t4" and s.kind == "skill"
+                                  for s in v._skills)
+
+
+def test_rrv_cap_probe_off_by_default():
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_cap_probe("t1:c0", "famA", "spec", "PROMPT\n```python\n", _CAP_CODE,
+                       _CAP_TESTS_VARIANT, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a - b\n```"  # broken
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2)
+    assert not res["veto"] and res["checked_cap"] == 0, \
+        "cap stratum must be inert unless check_cap_probes > 0"
+
+
+def test_rrv_cap_probe_fires_on_capability_loss():
+    """The instance-vs-capability gap: the memorized skill still regenerates
+    fine, but the family's certified CAPABILITY variant breaks -> veto."""
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_certified("t1", "famA", "Return the sum.", "PROMPT fid:t1\n```python\n",
+                       _CERT_CODE, _CERT_TESTS, 0.9)
+    v.commit_cap_probe("t1:c0", "famA", "variant spec", "PROMPT v\n```python\n",
+                       _CAP_CODE, _CAP_TESTS_VARIANT, 0.9)
+    # regeneration passes the skill's OWN tests but fails the variant's tests
+    eng.regen_code = ("```python\ndef add2(a, b):\n"
+                      "    return 3 if (a, b) == (1, 2) else a - b\n```")
+    res = v.selfreplay_veto(eng, ver, check_skills=3, n_samples=2,
+                            check_cap_probes=1)
+    assert res["checked"] == 1 and not res["broke"], "skill itself is retained"
+    assert res["veto"] and "t1:c0" in res["broke_cap"], res
+    assert res["checked_cap"] == 1
+
+
+def test_rrv_cap_probe_checks_every_family():
+    v, ver, eng = SelfCertVault(), Verifier(sandbox=PythonSandbox()), StubEngine()
+    v.commit_cap_probe("tA:c0", "famA", "spec A", "PA\n```python\n", _CAP_CODE,
+                       _CAP_TESTS_VARIANT, 0.9)
+    v.commit_cap_probe("tB:c0", "famB", "spec B", "PB\n```python\n", _CAP_CODE,
+                       _CAP_TESTS_VARIANT, 0.9)
+    eng.regen_code = "```python\ndef add2(a, b):\n    return a + b\n```"
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1)
+    assert not res["veto"] and res["checked_cap"] == 2, \
+        "pool must police the newest cap_probe of EVERY family"
+
+
+def test_rrv_cap_probe_math():
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    eng = StubEngine()
+    math_prompt = ("Solve and give ONLY the final numeric answer.\n"
+                   "What is 6 times 7?\nAnswer: ")
+    v.commit_cap_probe("m1:c0", "arith", "What is 6 times 7?", math_prompt,
+                       "42", [], 0.86, domain="math")
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=3,
+                            check_cap_probes=1)
+    assert not res["veto"] and res["checked_cap"] == 1
+    eng.math_answers = ["41", "41", "41"]
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=3,
+                            check_cap_probes=1)
+    assert res["veto"] and "m1:c0" in res["broke_cap"]
+    eng.math_answers = ["The answer is 42.0", "41", "41"]  # canonical form
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=3,
+                            check_cap_probes=1)
+    assert not res["veto"]
+
+
+class _MarginEngine:
+    """First regeneration batch is broken; the margin re-check batch recovers."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def sample_candidates(self, prompt, n, temperature=0.7, top_p=0.95,
+                          adapter_on=True, max_new_tokens=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ["```python\ndef add2(a, b):\n    return a - b\n```"] * max(1, n)
+        return ["```python\ndef add2(a, b):\n    return a + b\n```"] * max(1, n)
+
+
+def test_rrv_cap_probe_margin_recheck_saves_noisy_probe():
+    """Bounded-damage guard: with cap_margin armed, a probe whose first batch
+    fails gets extra regenerations before it may veto."""
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    v.commit_cap_probe("t1:c0", "famA", "variant spec", "PROMPT v\n```python\n",
+                       _CAP_CODE, _CAP_TESTS_VARIANT, 0.9)
+    eng = _MarginEngine()
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_margin=0)
+    assert res["veto"], "without the guard the noisy probe vetoes"
+    eng = _MarginEngine()
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_margin=2)
+    assert not res["veto"] and eng.calls == 2, \
+        "margin re-check must recover a probe the first batch lost"
+
+
+def test_v5b_cap_guard_arms_after_budget():
+    """Env-level ledger: once cap-probe vetoes reach the budget fraction of a
+    phase's update attempts, the gate arms the margin guard (audit field)."""
+    from gcl.curriculum import Family
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg._learner_name = "sccl_cap"
+    cfg.sccl_learners = ["sccl_cap"]
+    cfg.sccl_nogate_learners = []
+    cfg.sccl_gate_probe = 0
+    cfg.sccl_capprobe_learners = ["sccl_cap"]
+    cfg.sccl_capprobe_check = 1
+    cfg.sccl_capprobe_budget = 0.5
+    eng = FakeEngine(cfg, regen_passes=False)
+    ver = Verifier(sandbox=PythonSandbox())
+    vault = SelfCertVault()
+    t1 = _poisoned_task()
+    t2 = Task(task_id="t_gold_wrong_2", family="fam", domain="code",
+              prompt="Return the sum of two integers a and b.",
+              test_code="assert add2(2, 2) == 99",          # poisoned gold
+              reference_answer="def add2(a, b):\n    return 99",
+              entry_point="add2")
+    env = GroundedContinualEnv(cfg, eng, ver,
+                               [Family(name="fam", tasks=[t1, t2], holdout=[])],
+                               holdout=[], vault=vault, sccl=True)
+    vault.commit_cap_probe("seed:c0", "fam", "variant spec",
+                           "PROMPT v\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9)
+    # broken regen (regen_passes=False) fails the cap probe on every attempt
+    _, _, _, s1 = env.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                  metadata={"sccl": _cert_meta(found=True)}))
+    g1 = s1["update_info"]["gate"]
+    assert g1["veto"] and g1["broke_cap"], g1
+    assert g1["cap_guard_armed"] is False, "guard cannot arm on the first attempt"
+    _, _, _, s2 = env.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                  metadata={"sccl": _cert_meta(found=True)}))
+    g2 = s2["update_info"]["gate"]
+    assert g2["cap_guard_armed"] is True, \
+        "100% cap-veto rate >= 0.5 budget must arm the guard"
+
+
+def test_v5b_default_config_is_inert():
+    """All v5b switches default OFF so pre-v5b rows stay bit-identical."""
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    assert cfg.sccl_capprobe_learners == []
+    assert cfg.sccl_capprobes == 0
+    assert cfg.sccl_capprobe_check == 0
+    import inspect
+    from gcl.vault import SelfCertVault
+    sig = inspect.signature(SelfCertVault.selfreplay_veto)
+    assert sig.parameters["check_cap_probes"].default == 0
+    assert sig.parameters["cap_margin"].default == 0

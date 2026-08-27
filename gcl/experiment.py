@@ -192,7 +192,9 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         sccl_stats = {"steps": 0, "certified": 0, "rrv_updates": 0, "rrv_vetoes": 0,
                       "gold_probes": 0, "gold_agree": 0, "cert_conf_sum": 0.0,
                       "probes_made": 0, "probes_committed": 0, "probes_promoted": 0,
-                      "nbhd_checked": 0, "nbhd_rejected": 0}
+                      "nbhd_checked": 0, "nbhd_rejected": 0,
+                      "cap_probes_made": 0, "cap_probes_committed": 0,
+                      "cap_guard_armed": 0}
         t0 = time.time()
         obs = env.reset()
         last_family_seen = 0
@@ -265,6 +267,39 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                                                         "committed": bool(committed)}
                         else:
                             meta_extra["sccl_probe"] = {"made": False}
+                    # ---- SCCL v5b: manufacture certified CAPABILITY probes ----
+                    # Same spec-only machinery as v2 probes (make_probe sees
+                    # spec/domain/CertResult, never a Task or gold field), but
+                    # committed as kind="cap_probe" with newest-per-family
+                    # replacement: the veto pool polices each family's
+                    # GENERALIZATION with its freshest certified variant.
+                    n_cap = int(getattr(cfg, "sccl_capprobes", 0))
+                    if cr.found and vault is not None and n_cap > 0 and \
+                            name in set(getattr(cfg, "sccl_capprobe_learners", [])):
+                        cap_made = []
+                        for i in range(n_cap):
+                            try:
+                                cp = certifier.make_probe(engine, verifier,
+                                                          task.prompt,
+                                                          task.domain, cr)
+                            except Exception:
+                                cp = None
+                            if cp is None:
+                                cap_made.append(False)
+                                continue
+                            sccl_stats["cap_probes_made"] += 1
+                            committed = vault.commit_cap_probe(
+                                task_id=task.task_id + f":c{i}",
+                                family=task.family,
+                                spec=cp["spec"], prompt=cp["prompt"],
+                                code=cp["code"],
+                                self_tests=cp.get("self_tests") or [],
+                                conf=float(cp.get("confidence", 0.0)),
+                                domain=cp.get("domain", task.domain),
+                                entry=cp.get("entry", ""))
+                            sccl_stats["cap_probes_committed"] += int(bool(committed))
+                            cap_made.append(bool(committed))
+                        meta_extra["sccl_cap_probe"] = {"made": cap_made}
                 else:
                     # VSR: retrieval-grounded generation (forward transfer). Controls:
                     # unchanged learner prompt. Gold reference is metadata only.
@@ -319,6 +354,7 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                         sccl_stats["rrv_updates"] += 1
                         sccl_stats["rrv_vetoes"] += int(not ui.get("accepted", True))
                         sccl_stats["probes_promoted"] += int(gate.get("probes_promoted", 0))
+                        sccl_stats["cap_guard_armed"] += int(bool(gate.get("cap_guard_armed", False)))
                     gt = gate.get("gold_telemetry")
                     if isinstance(gt, dict):
                         sccl_stats["gold_probes"] += 1

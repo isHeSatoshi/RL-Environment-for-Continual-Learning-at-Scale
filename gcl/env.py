@@ -156,6 +156,10 @@ class GroundedContinualEnv:
         self._replay_frac = float(getattr(config, "replay_frac", 0.0))
         self._dedup_enabled = bool(getattr(config, "use_vault_dedup", False))
         self._dedup_sim = float(getattr(config, "vault_dedup_sim", 0.95))
+        # ---- SCCL v5b bounded-damage guard state (per phase = per family) ----
+        self._cap_phase: Optional[str] = None
+        self._cap_attempts = 0
+        self._cap_vetoes = 0
         self.last_retrieved: List = []  # set per-step for recall measurement
         self.reset()
 
@@ -191,6 +195,9 @@ class GroundedContinualEnv:
         self.rewards: List[float] = []
         self.update_count = 0
         self.rollback_count = 0
+        self._cap_phase = None
+        self._cap_attempts = 0
+        self._cap_vetoes = 0
         return self._obs()
 
     def _family(self):
@@ -294,19 +301,45 @@ class GroundedContinualEnv:
             # ---- SCCL v5: family-STRATIFIED veto pool (gold-free). Off unless
             # the learner is listed, so all pre-v5 rows stay bit-identical. ----
             strat = name in set(getattr(self.cfg, "sccl_stratified_learners", []))
+            # ---- SCCL v5b: capability-probe stratum + bounded-damage guard ----
+            cap_learner = name in set(getattr(self.cfg, "sccl_capprobe_learners", []))
+            cap_check = (int(getattr(self.cfg, "sccl_capprobe_check", 0))
+                         if cap_learner else 0)
+            cap_margin = 0
+            cap_armed = False
+            if cap_check > 0 and task is not None:
+                fam = getattr(task, "family", "")
+                if fam != self._cap_phase:  # new phase: reset the guard ledger
+                    self._cap_phase = fam
+                    self._cap_attempts = 0
+                    self._cap_vetoes = 0
+                budget = float(getattr(self.cfg, "sccl_capprobe_budget", 0.5))
+                if self._cap_attempts > 0 and \
+                        self._cap_vetoes / self._cap_attempts >= budget:
+                    cap_margin = int(getattr(self.cfg, "sccl_capprobe_margin", 2))
+                    cap_armed = True
             veto = self.vault.selfreplay_veto(
                 eng, self.verifier,
                 check_skills=getattr(self.cfg, "sccl_replay_check", 3),
                 n_samples=getattr(self.cfg, "sccl_replay_samples", 2),
                 check_probes=int(getattr(self.cfg, "sccl_probe_check", 0)) if probe_learner else 0,
                 check_math=int(getattr(self.cfg, "sccl_rrv_math", 0)) if probe_learner else 0,
-                stratified=strat)
+                stratified=strat,
+                check_cap_probes=cap_check,
+                cap_margin=cap_margin)
+            if cap_check > 0:
+                self._cap_attempts += 1
+                if veto["veto"] and veto.get("broke_cap"):
+                    self._cap_vetoes += 1
             gate.update({"veto": veto["veto"], "veto_reason": veto["reason"],
                          "checked": veto["checked"], "broke": veto["broke"],
                          "checked_probes": veto.get("checked_probes", 0),
                          "broke_probes": veto.get("broke_probes", []),
                          "checked_math": veto.get("checked_math", 0),
                          "broke_math": veto.get("broke_math", []),
+                         "checked_cap": veto.get("checked_cap", 0),
+                         "broke_cap": veto.get("broke_cap", []),
+                         "cap_guard_armed": cap_armed,
                          "skipped": veto.get("skipped", []),
                          "stratified": veto.get("stratified", False)})
             accepted = not veto["veto"]

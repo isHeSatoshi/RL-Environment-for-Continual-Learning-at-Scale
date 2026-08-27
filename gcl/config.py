@@ -107,6 +107,25 @@ class ExperimentConfig:
     # skills while arith eroded unchecked). Listed learners draw the check pool
     # newest-per-family instead. Off by default => pre-v5 rows bit-identical.
     sccl_stratified_learners: List[str] = field(default_factory=list)
+    # ---- SCCL v5b: capability probes (gold-free capability-level gate) ----
+    # v5 telemetry (Branch C, sccl_strat@44): 11/14 accepted updates degraded
+    # the arith capability while memorized instances still passed their stored
+    # self-tests — the instance-vs-capability gap. Neither a recency nor a
+    # stratified pool over memorized instances can see it. Listed learners
+    # manufacture certified CAPABILITY VARIANTS (numeric perturbations for
+    # math domains; paraphrases with fresh self-tests for code domains) for
+    # every certified skill, store the NEWEST one per family as kind=
+    # "cap_probe" (never trained on), and the RRV veto re-checks them: an
+    # update is vetted iff it breaks a family's GENERALIZATION, not just its
+    # memorized points. Bounded-damage guard: once cap-probe vetoes reach the
+    # budget fraction of a phase's update attempts, the veto grants margin
+    # re-checks (extra regenerations) before breaking, so a noisy probe cannot
+    # collapse plasticity. Off by default => pre-v5b rows bit-identical.
+    sccl_capprobe_learners: List[str] = field(default_factory=list)
+    sccl_capprobes: int = 0             # cap probes manufactured per certified skill
+    sccl_capprobe_check: int = 0        # >0 => veto re-checks the per-family pool
+    sccl_capprobe_budget: float = 0.5   # phase veto fraction that arms the guard
+    sccl_capprobe_margin: int = 2       # extra regenerations under the guard
     # output
     out_dir: str = "runs/run"
     seed: int = 42

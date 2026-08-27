@@ -412,6 +412,38 @@ class SelfCertVault(SkillVault):
                                      conf=conf, domain=domain, entry=entry,
                                      dedup_sim=0.0, kind="probe")
 
+    def commit_cap_probe(self, task_id: str, family: str, spec: str, prompt: str,
+                          code: str, self_tests: List[str], conf: float,
+                          domain: str = "code", entry: str = "") -> bool:
+        """Admit a certified CAPABILITY probe (kind="cap_probe", SCCL v5b).
+
+        A cap_probe is a certified variant of a family's capability that the
+        model never trains on: numeric perturbation for math domains,
+        paraphrase with fresh self-tests for code domains. The veto pool is
+        bounded by construction: only the NEWEST cap_probe of each family is
+        kept, so the gate always polices the freshest manufactured evidence of
+        that capability and the per-veto cost stays O(#families).
+        """
+        ok = self.commit_certified(task_id=task_id, family=family, spec=spec,
+                                   prompt=prompt, code=code, self_tests=self_tests,
+                                   conf=conf, domain=domain, entry=entry,
+                                   dedup_sim=0.0, kind="cap_probe")
+        if not ok:
+            return False
+        # keep only the newest cap_probe per family (list order = commit order)
+        newest: Dict[str, Any] = {}
+        for s in self._skills:
+            if getattr(s, "kind", "") == "cap_probe":
+                newest[s.family] = s
+        drop = [s for s in self._skills
+                if getattr(s, "kind", "") == "cap_probe" and newest.get(s.family) is not s]
+        if drop:
+            drop_ids = {id(s) for s in drop}
+            self._skills = [s for s in self._skills if id(s) not in drop_ids]
+            self._embs = [s.emb for s in self._skills]
+            self._save()
+        return True
+
     def promote_probes(self, min_checks: int = 1) -> int:
         """Graduate probes that survived >= min_checks RRV checks into skills.
 
@@ -479,7 +511,8 @@ class SelfCertVault(SkillVault):
     def selfreplay_veto(self, engine: Any, verifier: Any, *,
                         check_skills: int = 3, n_samples: int = 2,
                         sample_temp: float = 0.7, check_probes: int = 0,
-                        check_math: int = 0, stratified: bool = False) -> Dict[str, Any]:
+                        check_math: int = 0, stratified: bool = False,
+                        check_cap_probes: int = 0, cap_margin: int = 0) -> Dict[str, Any]:
         """Self-Replay Veto (RRV) — the gold-free forgetting detector.
 
         For each recently committed self-certified skill, REGENERATE solutions
@@ -501,6 +534,11 @@ class SelfCertVault(SkillVault):
             (newest ceil(k/F) per family) instead of the global last-k, so
             older certified families stay under gate protection after the
             stream moves on. Off by default: existing rows stay bit-identical.
+          * check_cap_probes>0 — SCCL v5b: re-check the newest certified
+            CAPABILITY variant of every family (both domains). Polices the
+            instance-vs-capability gap that skill/probe replay cannot see.
+            cap_margin>0 arms the bounded-damage guard: a probe that breaks
+            gets extra regeneration attempts before it can veto.
 
         Note we deliberately do NOT fall back to executing the stored code: that
         artifact trivially passes its own tests regardless of the model's state,
@@ -520,9 +558,9 @@ class SelfCertVault(SkillVault):
         skills = [s for s in self._skills if getattr(s, "kind", "skill") == "skill"]
         probes = [s for s in self._skills if getattr(s, "kind", "skill") == "probe"]
 
-        def _regen_codes(prompt: str) -> List[str]:
+        def _regen_codes(prompt: str, n: int = 0) -> List[str]:
             try:
-                regen = engine.sample_candidates(prompt, n=max(1, n_samples),
+                regen = engine.sample_candidates(prompt, n=max(1, n or n_samples),
                                                  temperature=sample_temp)
                 return [c for c in (extract_code(r) for r in regen)
                         if (c or "").strip()]
@@ -585,11 +623,69 @@ class SelfCertVault(SkillVault):
                 if not ok:
                     broke_math.append(s.task_id)
 
-        all_broke = broke + broke_probes + broke_math
+        # 4) capability probes (SCCL v5b): newest certified variant PER FAMILY,
+        # both domains. This stratum polices the instance-vs-capability gap:
+        # memorized instances can keep passing their stored self-tests while
+        # the capability the variants measure erodes inside accepted updates.
+        checked_cap = 0
+        broke_cap: List[str] = []
+        if check_cap_probes > 0:
+            caps: Dict[str, Any] = {}
+            for s in self._skills:
+                if getattr(s, "kind", "") == "cap_probe":
+                    caps[s.family] = s  # commit order => newest per family
+            for fam in sorted(caps):
+                s = caps[fam]
+                if getattr(s, "domain", "code") == "math":
+                    want = format_number(str(s.code))
+                    checked_cap += 1
+
+                    def _math_ok(samples: List[str]) -> bool:
+                        for r in samples:
+                            a = extract_number(r or "")
+                            if a is not None and format_number(a) == want:
+                                return True
+                        return False
+
+                    try:
+                        regen = engine.sample_candidates(s.prompt,
+                                                         n=max(1, n_samples),
+                                                         temperature=sample_temp)
+                    except Exception:
+                        regen = []
+                    ok = _math_ok(regen)
+                    if not ok and cap_margin > 0:
+                        try:
+                            extra = engine.sample_candidates(s.prompt,
+                                                             n=cap_margin,
+                                                             temperature=sample_temp)
+                        except Exception:
+                            extra = []
+                        ok = _math_ok(extra)
+                    if not ok:
+                        broke_cap.append(s.task_id)
+                    continue
+                tests = [l.strip() for l in (s.test_code or "").splitlines()
+                         if l.strip().startswith("assert")]
+                if not tests:
+                    skipped.append(s.task_id)
+                    continue
+                checked_cap += 1
+                codes = _regen_codes(s.prompt)
+                if self._any_passes(codes, tests, verifier):
+                    continue
+                if cap_margin > 0:
+                    extra = _regen_codes(s.prompt, cap_margin)
+                    if self._any_passes(extra, tests, verifier):
+                        continue
+                broke_cap.append(s.task_id)
+
+        all_broke = broke + broke_probes + broke_math + broke_cap
         return {"veto": bool(all_broke),
                 "reason": ("rrv_regress:" + ",".join(all_broke)) if all_broke else "ok",
                 "checked": checked, "broke": broke,
                 "checked_probes": checked_probes, "broke_probes": broke_probes,
                 "checked_math": checked_math, "broke_math": broke_math,
+                "checked_cap": checked_cap, "broke_cap": broke_cap,
                 "skipped": skipped, "n_skills": len(self._skills),
                 "stratified": stratified}
