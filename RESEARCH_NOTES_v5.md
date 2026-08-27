@@ -250,6 +250,19 @@ small effect — it is zero effect.
    The gate checks certified INSTANCES; the holdout measures general
    CAPABILITY. The instance-vs-capability gap (G) is now the primary target.
 
+   Sharper quantification (sccl_strat@44 trajectory, gold telemetry is
+   measurement-only): of 14 accepted updates, 11 degraded the arith gold
+   probe below base-0.05 — spread over ALL phases: arith 2, math_word 2,
+   string 3, drift 4. Two degradations happen INSIDE the arith phase itself:
+   even training on arith instances overfits away from arith generalization.
+   So no pool policy over memorized instances can close the gap; the
+   instances pass their stored self-tests while the capability erodes.
+   (The 4 vetoes all broke arith skill mbpp_388: 3x during string, 1x during
+   drift together with drift_drift_5 — coverage worked, capability still
+   leaked.) Branch C / v5b must check generalization directly: capability
+   probes = self-generated numeric variants with derived self-tests, admitted
+   by majority vote, included in the stratified pool.
+
 **The fix (commit e53923a).** `_base_anchor()` now snapshots from
 `self.model.named_parameters()` (requires_grad only), matching the penalty
 loop's iteration exactly. Two new engine-level tests guard engagement, both
