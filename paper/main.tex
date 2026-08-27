@@ -332,6 +332,24 @@ VSR-nogold (gold tests)                 & XX.XXX & +X.XXX & X.XXX & +X.XXX & XX/
 \end{tabular}
 \end{table}
 
+\begin{figure}[htbp]
+\centering
+\IfFileExists{fig_v5_family_curves.png}{%
+  \includegraphics[width=\columnwidth]{fig_v5_family_curves.png}}{%
+  \fbox{\parbox[c][3.2cm][c]{0.92\columnwidth}{\centering figure pending --- rendered from the completed run (runs/sccl\_v5\_fixed)}}}
+\caption{Mean verified reward per family phase (stream order: arith, math\_word, string, drift) for the six corrected-factorial learners, seed 42. Rendered by \texttt{gcl/plots.py} from the run's measured trajectories; no hand-edited series.}
+\label{fig:v5families}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\IfFileExists{fig_v5_frontier.png}{%
+  \includegraphics[width=0.86\columnwidth]{fig_v5_frontier.png}}{%
+  \fbox{\parbox[c][3.2cm][c]{0.8\columnwidth}{\centering figure pending --- rendered from the completed run (runs/sccl\_v5\_fixed)}}}
+\caption{Stability--plasticity frontier of the corrected factorial: final ACC against the number of real (accepted) updates; annotations give forgetting. The candidate composition is read against the \textsc{sccl} cell per the pre-registered rules.}
+\label{fig:v5frontier}
+\end{figure}
+
 \textbf{Pre-registered reading.} Three rules, fixed before observing the engaged-anchor data: \textbf{H1 (coverage main effect)} --- stratified veto alone lifts the arithmetic holdout over \textsc{sccl} without costing more than $0.02$ frontier; \textbf{H2 (anchor main effect)} --- the engaged anchor lifts arithmetic over \textsc{sccl} at comparable accuracy; \textbf{BREAKTHROUGH (composition)} --- the both-cell reaches arithmetic $\geq 0.55$ (closing most of the gap to frozen's $0.600$) at frontier $\geq$ \textsc{sccl} $-0.02$, in which case multi-seed confirmation (seeds 43/44, same protocol as v3) precedes any headline claim. Verdict: XX (filled from the pre-registered check script on the completed run).
 
 \section{Discussion}
