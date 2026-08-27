@@ -52,21 +52,24 @@
   \newcommand{\vtwovsrnogoldacc}{--}\newcommand{\vtwovsrnogoldbwt}{--}\newcommand{\vtwovsrnogoldforget}{--}\newcommand{\vtwovsrnogoldfrontier}{--}%
   \newcommand{\vtwovsrnogoldupdates}{--}\newcommand{\vtwovsrnogoldrollbacks}{--}}
 
-% v3 ladder registry — same stream, seeded (gcl.report --prefix vthree)
+% v3 ladder registry — same stream, seeded, mean±std over seeds 42/43/44
+% (gcl.report --aggregate runs/sccl_v3_seeds --prefix vthree)
 \IfFileExists{results_v3.tex}{\input{results_v3.tex}}{%
-  \newcommand{\vthreefrozenacc}{--}\newcommand{\vthreefrozenbwt}{--}\newcommand{\vthreefrozenforget}{--}%
-  \newcommand{\vthreefrozenfrontier}{--}\newcommand{\vthreefrozenupdates}{--}\newcommand{\vthreefrozenrollbacks}{--}%
-  \newcommand{\vthreescclacc}{--}\newcommand{\vthreescclbwt}{--}\newcommand{\vthreescclforget}{--}\newcommand{\vthreescclfrontier}{--}%
-  \newcommand{\vthreescclupdates}{--}\newcommand{\vthreescclrollbacks}{--}\newcommand{\vthreescclrrvvetoes}{--}%
-  \newcommand{\vthreescclcertrate}{--}\newcommand{\vthreescclmeanconf}{--}%
-  \newcommand{\vthreescclnacc}{--}\newcommand{\vthreescclnbwt}{--}\newcommand{\vthreescclnforget}{--}\newcommand{\vthreescclnfrontier}{--}%
-  \newcommand{\vthreescclnupdates}{--}\newcommand{\vthreescclnrollbacks}{--}\newcommand{\vthreescclnrrvvetoes}{--}%
-  \newcommand{\vthreescclncertrate}{--}\newcommand{\vthreescclnmeanconf}{--}%
-  \newcommand{\vthreescclnnbhdchecked}{--}\newcommand{\vthreescclnnbhdrejected}{--}%
-  \newcommand{\vthreescclpromoteacc}{--}\newcommand{\vthreescclpromotebwt}{--}\newcommand{\vthreescclpromoteforget}{--}\newcommand{\vthreescclpromotefrontier}{--}%
-  \newcommand{\vthreescclpromoteupdates}{--}\newcommand{\vthreescclpromoterollbacks}{--}\newcommand{\vthreescclpromoterrvvetoes}{--}\newcommand{\vthreescclpromoteprobes}{--}%
-  \newcommand{\vthreevsrnogoldacc}{--}\newcommand{\vthreevsrnogoldbwt}{--}\newcommand{\vthreevsrnogoldforget}{--}\newcommand{\vthreevsrnogoldfrontier}{--}%
-  \newcommand{\vthreevsrnogoldupdates}{--}\newcommand{\vthreevsrnogoldrollbacks}{--}}
+  \newcommand{\vthreefrozenaccmean}{--}\newcommand{\vthreefrozenaccstd}{--}\newcommand{\vthreefrozenbwtmean}{--}\newcommand{\vthreefrozenbwtstd}{--}%
+  \newcommand{\vthreefrozenforgetmean}{--}\newcommand{\vthreefrozenforgetstd}{--}\newcommand{\vthreefrozenfrontiermean}{--}\newcommand{\vthreefrozenfrontierstd}{--}%
+  \newcommand{\vthreefrozenupdatesmean}{--}\newcommand{\vthreefrozenrollbacksmean}{--}%
+  \newcommand{\vthreescclaccmean}{--}\newcommand{\vthreescclaccstd}{--}\newcommand{\vthreescclbwtmean}{--}\newcommand{\vthreescclbwtstd}{--}%
+  \newcommand{\vthreescclforgetmean}{--}\newcommand{\vthreescclforgetstd}{--}\newcommand{\vthreescclfrontiermean}{--}\newcommand{\vthreescclfrontierstd}{--}%
+  \newcommand{\vthreescclupdatesmean}{--}\newcommand{\vthreescclrollbacksmean}{--}%
+  \newcommand{\vthreescclnaccmean}{--}\newcommand{\vthreescclnaccstd}{--}\newcommand{\vthreescclnbwtmean}{--}\newcommand{\vthreescclnbwtstd}{--}%
+  \newcommand{\vthreescclnforgetmean}{--}\newcommand{\vthreescclnforgetstd}{--}\newcommand{\vthreescclnfrontiermean}{--}\newcommand{\vthreescclnfrontierstd}{--}%
+  \newcommand{\vthreescclnupdatesmean}{--}\newcommand{\vthreescclnrollbacksmean}{--}%
+  \newcommand{\vthreescclpromoteaccmean}{--}\newcommand{\vthreescclpromoteaccstd}{--}\newcommand{\vthreescclpromotebwtmean}{--}\newcommand{\vthreescclpromotebwtstd}{--}%
+  \newcommand{\vthreescclpromoteforgetmean}{--}\newcommand{\vthreescclpromoteforgetstd}{--}\newcommand{\vthreescclpromotefrontiermean}{--}\newcommand{\vthreescclpromotefrontierstd}{--}%
+  \newcommand{\vthreescclpromoteupdatesmean}{--}\newcommand{\vthreescclpromoterollbacksmean}{--}%
+  \newcommand{\vthreevsrnogoldaccmean}{--}\newcommand{\vthreevsrnogoldaccstd}{--}\newcommand{\vthreevsrnogoldbwtmean}{--}\newcommand{\vthreevsrnogoldbwtstd}{--}%
+  \newcommand{\vthreevsrnogoldforgetmean}{--}\newcommand{\vthreevsrnogoldforgetstd}{--}\newcommand{\vthreevsrnogoldfrontiermean}{--}\newcommand{\vthreevsrnogoldfrontierstd}{--}%
+  \newcommand{\vthreevsrnogoldupdatesmean}{--}\newcommand{\vthreevsrnogoldrollbacksmean}{--}}
 
 \title{Self-Certified Continual Learning:\\Gold-Free, Safe Weight Updates for Deployed Code LLMs}
 
@@ -240,24 +243,20 @@ VSR-nogold (gold tests) & \vtwovsrnogoldacc & \vtwovsrnogoldbwt & \vtwovsrnogold
 
 \begin{table}[htbp]
 \centering
-\caption{SCCL v3 — neighborhood certification at \emph{admission} (same stream hash; seeded, \texttt{torch\_seed}=42; compare within this run). \textsc{sccl\_n} = v1 + only the admission filter (isolates the mechanism); NbhdRej = certified targets rejected by the neighborhood check before any gradient; \textsc{sccl\_promote} = v2 monitoring + probe-curriculum reference.}
+\caption{SCCL v3 — neighborhood certification at \emph{admission} (same stream hash; seeded protocol, seeds 42/43/44, mean$\pm$std; compare within this table). \textsc{sccl\_n} = v1 + only the admission filter (isolates the mechanism); \textsc{sccl\_promote} = v2 monitoring + probe-curriculum reference; \textsc{vsr\_nogold} = self-taught targets verified by gold tests. Admission-rejection and veto counters are per-run quantities; the seed-42 admission audit is reported in the text.}
 \label{tab:v3}
-\begin{tabular}{lccccccc}
+\begin{tabular}{lccccc}
 \toprule
-Learner & ACC$\uparrow$ & BWT$\uparrow$ & Forget$\downarrow$ & Frontier$\uparrow$ & Upd/Rbk & NbhdRej & Vetoes \\
+Learner & ACC$\uparrow$ & BWT$\uparrow$ & Forget$\downarrow$ & Frontier$\uparrow$ & Upd/Rbk \\
 \midrule
-Frozen              & \vthreefrozenacc & \vthreefrozenbwt & \vthreefrozenforget & \vthreefrozenfrontier & \vthreefrozenupdates/\vthreefrozenrollbacks & -- & -- \\
-SCCL (v1 ref)       & \vthreescclacc & \vthreescclbwt & \vthreescclforget & \vthreescclfrontier & \vthreescclupdates/\vthreescclrollbacks & -- & \vthreescclrrvvetoes \\
-\textbf{SCCL + nbhd admission} & \textbf{\vthreescclnacc} & \textbf{\vthreescclnbwt} & \textbf{\vthreescclnforget} & \textbf{\vthreescclnfrontier} & \vthreescclnupdates/\vthreescclnrollbacks & \vthreescclnnbhdrejected & \vthreescclnrrvvetoes \\
-SCCL promote (v2 ref) & \vthreescclpromoteacc & \vthreescclpromotebwt & \vthreescclpromoteforget & \vthreescclpromotefrontier & \vthreescclpromoteupdates/\vthreescclpromoterollbacks & -- & \vthreescclpromoterrvvetoes \\
-VSR-nogold (gold tests) & \vthreevsrnogoldacc & \vthreevsrnogoldbwt & \vthreevsrnogoldforget & \vthreevsrnogoldfrontier & \vthreevsrnogoldupdates/\vthreevsrnogoldrollbacks & -- & -- \\
+Frozen              & \vthreefrozenaccmean\,$\pm$\,\vthreefrozenaccstd & \vthreefrozenbwtmean\,$\pm$\,\vthreefrozenbwtstd & \vthreefrozenforgetmean\,$\pm$\,\vthreefrozenforgetstd & \vthreefrozenfrontiermean\,$\pm$\,\vthreefrozenfrontierstd & \vthreefrozenupdatesmean/\vthreefrozenrollbacksmean \\
+SCCL (v1 ref)       & \vthreescclaccmean\,$\pm$\,\vthreescclaccstd & \vthreescclbwtmean\,$\pm$\,\vthreescclbwtstd & \vthreescclforgetmean\,$\pm$\,\vthreescclforgetstd & \vthreescclfrontiermean\,$\pm$\,\vthreescclfrontierstd & \vthreescclupdatesmean/\vthreescclrollbacksmean \\
+\textbf{SCCL + nbhd admission} & \textbf{\vthreescclnaccmean}\,$\pm$\,\vthreescclnaccstd & \vthreescclnbwtmean\,$\pm$\,\vthreescclnbwtstd & \textbf{\vthreescclnforgetmean}\,$\pm$\,\vthreescclnforgetstd & \vthreescclnfrontiermean\,$\pm$\,\vthreescclnfrontierstd & \vthreescclnupdatesmean/\vthreescclnrollbacksmean \\
+SCCL promote (v2 ref) & \vthreescclpromoteaccmean\,$\pm$\,\vthreescclpromoteaccstd & \vthreescclpromotebwtmean\,$\pm$\,\vthreescclpromotebwtstd & \vthreescclpromoteforgetmean\,$\pm$\,\vthreescclpromoteforgetstd & \vthreescclpromotefrontiermean\,$\pm$\,\vthreescclpromotefrontierstd & \vthreescclpromoteupdatesmean/\vthreescclpromoterollbacksmean \\
+VSR-nogold (gold tests) & \vthreevsrnogoldaccmean\,$\pm$\,\vthreevsrnogoldaccstd & \vthreevsrnogoldbwtmean\,$\pm$\,\vthreevsrnogoldbwtstd & \vthreevsrnogoldforgetmean\,$\pm$\,\vthreevsrnogoldforgetstd & \vthreevsrnogoldfrontiermean\,$\pm$\,\vthreevsrnogoldfrontierstd & \vthreevsrnogoldupdatesmean/\vthreevsrnogoldrollbacksmean \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-% NOTE(v3): results narrative for Table~\ref{tab:v3} is filled in after the
-% seeded v3 ladder completes — see scripts/analyze_nbhd.py for the gold-only
-% admission audit (over-filter rate / correct-skepticism / admitted-gold-wrong).
 
 \textbf{Unverified self-training collapses.} \textsc{selfdistill} (train on own outputs) and \textsc{execfilter} (train on executions without certification) both degrade below frozen with $\approx 0.24$ forgetting: without a target-quality signal, gradient steps accumulate the model's own errors. This is the failure mode SCCL exists to fix.
 
@@ -275,10 +274,12 @@ VSR-nogold (gold tests) & \vthreevsrnogoldacc & \vthreevsrnogoldbwt & \vthreevsr
 
 \textbf{Self-manufactured stability: an honest accounting (v2).} In the rerun, \textsc{sccl\_v2} achieves the lowest forgetting of any gold-free learning row (0.075; \textsc{vsr\_nogold}'s 0.004 is lower, bought with gold tests) and the best string retention (0.80 vs.\ 0.60), but pays a plasticity price: its probe-extended gate vetoes 8 of 20 gated updates (vs.\ 2 of 21 for in-run \textsc{sccl}), accepts only 12 updates, under-trains math (0.75 holdout vs.\ 1.00), and lands below the in-run v1 reference on frontier ($+0.613$ vs.\ $+0.662$). The single-mechanism variants do worse: \textsc{sccl\_replay} ($+0.569$) and \textsc{sccl\_probe} ($+0.475$) both fall \emph{below the frozen control} ($+0.588$) on frontier, and \textsc{sccl\_probe} has the \emph{worst} arithmetic holdout (0.20) despite --- because of --- its probes: they detect damage and veto updates, but a rollback restores yesterday's adapter, not lost generalization, while the vetoed learning opportunity is gone. The consistent mechanism-level story across these rows: gate-side neighborhood checks police damage \emph{after} the gradient moved the weights, converting plasticity into stability at a visible exchange rate. Given the variance above, we do not claim the single-rerun ordering of v2 variants as settled; we claim the diagnosis. That diagnosis is what v3 acts on: filter instance-narrow solutions at \emph{admission}, before any gradient is spent (Sec.~\ref{sec:v3}), keeping the gate for drift.
 
+\textbf{The multi-seed v3 verdict: an informative negative result.} The seeded v3 ladder was run at seeds 42/43/44 (Table~\ref{tab:v3}; rails: a single stream hash and clean canaries on all seeds). The pre-registered success criterion --- \textsc{sccl\_n} reduces forgetting vs.\ the in-run \textsc{sccl} reference without losing frontier --- is \emph{not met}, and the failure is robust rather than noisy: \textsc{sccl\_n}'s forgetting is higher on \emph{all three seeds} ($0.131/0.125/0.131$ vs.\ $0.075/0.075/0.125$; mean $0.129 \pm 0.004$, the tightest estimate in the table, stably worse on the stability metric), while frontier ties within noise ($+0.521 \pm 0.042$ vs.\ $+0.504 \pm 0.106$). The admission filter does buy something real: the highest mean accuracy ($0.650 \pm 0.038$, also the lowest accuracy variance of any learning row) and the best backward transfer ($+0.170 \pm 0.038$), consistent with the seed-42 post-hoc gold-telemetry audit showing it raises admitted-target quality ($0.617 \to 0.667$ mean gold pass rate) at roughly half the plasticity. But better targets do not buy stability on this stream. Per family, the arithmetic holdout collapses on \emph{every} learning row on seeds 42/43 ($\le 0.40$ vs.\ frozen $0.60$) and on three of four learning rows on seed 44 ($0.15$--$0.20$), with \textsc{sccl\_n} protecting it on \emph{no} seed. Forgetting here is not dominated by target fragility; it is dominated by weight drift \emph{inside accepted updates}, which no accept/reject decision can prevent. Gates protect certified skills; they cannot protect uncertified general capability. That diagnosis is what v4 acts on (Sec.~\ref{sec:v4}).
+
 \section{Discussion}
 SCCL reframes the supervision problem of deployed continual learning: instead of asking ``who provides the tests?'', it asks ``when is the model's own executable interpretation of a spec trustworthy enough to learn from?'' Discriminative consensus gives a computable answer, the unanimous rule turns mastered skills into protected memory, and RRV converts that memory into a stability mechanism. The ladder shows each ablation doing its job: unsafe baselines collapse (verification matters), no-consensus degrades (cross-bag agreement matters) --- and full gold supervision underperforms gold-free certification. Gold is neither necessary for safe continual learning nor, when injected as reference targets, sufficient for it; the productive role left for gold is verifying the model's \emph{own} solutions (\textsc{vsr\_nogold}), which SCCL's self-tests largely reproduce for free --- on accuracy the gold-free match is within run-to-run variance, and the residual frontier gap is quantified above.
 
-The v2/v3 arc is a lesson about \emph{where} to spend verification compute. v1's gate protects trained points; v2 extends protection to a manufactured generalization neighborhood, and measurably buys stability with plasticity (more vetoes, fewer accepted updates, lower accuracy); v3 moves the same neighborhood evidence upstream of the gradient, where a rejection costs a certification attempt instead of a weight update. Stability mechanisms should act as early in the learning pipeline as the evidence allows: filtering fragile targets at admission is strictly cheaper than vetoing them after training, and the gate remains as a backstop for distribution drift the filters cannot see.
+The v2/v3/v4 arc is a lesson about \emph{where} stability mechanisms can and cannot act. v1's gate protects trained points; v2 extends protection to a manufactured generalization neighborhood, and measurably buys stability with plasticity (more vetoes, fewer accepted updates, lower accuracy); v3 moves the same neighborhood evidence upstream of the gradient, where a rejection costs a certification attempt instead of a weight update --- and multi-seed, that admission filter raises accuracy and its stability but \emph{not} forgetting (Table~\ref{tab:v3}). The general lesson: gates decide \emph{which} updates happen; they cannot control what an accepted update does to weights the gate never inspects. Filtering fragile targets is strictly cheaper than vetoing them after training, and the gate remains the right backstop for distribution drift --- but unvisited general capability must be defended \emph{inside} the update itself, which is the role of v4's base anchor (Sec.~\ref{sec:v4}).
 
 A methodological point deserves emphasis. Continual-learning benchmarks for LLMs rarely report seed variance; ours, measured directly, exceeds most published-style mechanism deltas on this stream. We read this as a warning for the area and as a design constraint: mechanisms must either produce effects robust across seeds or be reported with them.
 
@@ -303,7 +304,9 @@ python -m gcl.report --run runs/sccl_main --out paper/results.tex
 python -m gcl.runner --config configs/sccl_v2.json
 python -m gcl.report --run runs/sccl_v2 --out paper/results_v2.tex --prefix vtwo
 python -m gcl.runner --config configs/sccl_v3.json   # seeded (torch_seed=42)
-python scripts/run_seeds.py --config <cfg> --seeds 42,7,123  # multi-seed
+python scripts/run_seeds.py --config configs/sccl_v3.json --seeds 42,43,44
+python -m gcl.report --aggregate runs/sccl_v3_seeds --out paper/results_v3.tex --prefix vthree
+python -m gcl.runner --config configs/sccl_v4.json   # v4 base-anchor ladder (seeded)
 python -m pytest tests/test_sccl.py   # gold-free proof suite
 \end{lstlisting}
 Gold-freeness is checked by 60 tests: AST audits of \texttt{selfcert.py} (covering the probe-manufacture and neighborhood-check APIs), signature inspection, certification semantics under real sandbox execution, poisoned-gold adversarial environments, bidirectional probe cross-validation, certified-rehearsal mixing, admission-time neighborhood certification (open/closed decision policy), RRV rollback behavior across skills, probes, and math entries, and the v4 base anchor (per-learner engagement, ladder isolation, decision-independence, and per-learner $\lambda$ override).
