@@ -52,19 +52,35 @@ if [ $rc -ne 0 ]; then
 fi
 python - << 'PY'
 import json, os, sys
-m = json.load(open("runs/_smoke_v5b/metrics.json"))["learners"]
-cap = m.get("sccl_capprobe_strat", {})
-st = cap.get("sccl", {}) or {}
+
+# Per-step gate records live in trajectories_<name>.jsonl, NOT in
+# metrics.json["learners"][...]["trajectories"] (that field is a summary
+# string). This mirrors load_updates() in scripts/v5b_check.py so the smoke
+# audit and the final verdict checker read the identical evidence.
+def load_updates(run_dir, name):
+    p = os.path.join(run_dir, f"trajectories_{name}.jsonl")
+    if not os.path.exists(p):
+        return []
+    with open(p) as f:
+        return [json.loads(l) for l in f if l.strip()]
+
+def gates_of(recs):
+    return [g for g in (((e.get("update_info") or {}).get("gate")) for e in recs) if g]
+
+run = "runs/_smoke_v5b"
+m = json.load(open(os.path.join(run, "metrics.json")))["learners"]
+st = (m.get("sccl_capprobe_strat", {}).get("sccl") or {})
 committed = int(st.get("cap_probes_committed", 0))
-gates = [((e.get("update_info") or {}).get("gate") or {})
-         for e in cap.get("trajectories", [])]
+gates = gates_of(load_updates(run, "sccl_capprobe_strat"))
 checked = [g for g in gates if int(g.get("checked_cap", 0)) > 0]
-sccl = m.get("sccl", {})
-sst = sccl.get("sccl", {}) or {}
+sst = (m.get("sccl", {}).get("sccl") or {})
 leak = int(sst.get("cap_probes_committed", 0))
-ok = committed > 0 and len(checked) > 0 and leak == 0
+leak_gates = [g for g in gates_of(load_updates(run, "sccl"))
+              if int(g.get("checked_cap", 0)) > 0]
+ok = committed > 0 and len(checked) > 0 and leak == 0 and not leak_gates
 print(f"[v5b-smoke-audit] cap_probes_committed={committed} "
-      f"gates_with_checked_cap>0={len(checked)} sccl_control_leak={leak} -> "
+      f"gates_with_checked_cap>0={len(checked)} sccl_control_leak={leak} "
+      f"sccl_control_leak_gates={len(leak_gates)} -> "
       f"{'PASS' if ok else 'FAIL'}")
 sys.exit(0 if ok else 1)
 PY
