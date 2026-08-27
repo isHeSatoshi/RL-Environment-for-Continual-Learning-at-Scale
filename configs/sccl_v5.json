@@ -1,5 +1,5 @@
 {
-  "_comment": "SCCL v5 — FAMILY-STRATIFIED RRV VETO (gold-free gate-coverage fix). Diagnosis from the seed-42 post-mortem (RESEARCH_NOTES_v5.md): the RRV veto checks only skills[-check_skills:], a RECENCY window; the stream order arith->math->string->drift moves the window off older families, so all recorded vetoes broke only active-family skills and arith was NEVER checked during the phases where arith-holdout eroded (0.60 frozen -> 0.40 everywhere). v5 widens the gate's field of view: for learners in sccl_stratified_learners the check pool is the newest ceil(k/F) skill of EVERY certified family (deterministic, no RNG). Fully gold-free — only stored self-tests are re-executed. Ladder (seeded torch_seed=42, compare WITHIN run): frozen (control) / sccl (control; index 1 -> seed 43, must bit-reproduce v3 seed-42: ACC 0.575, arith 0.400) / sccl_strat (v5, k=3 -> ceil(3/4)=1 newest per family = 4 checks; ONLY the pool policy differs from sccl) / vsr_nogold (gold-test ref). STAGED: launch only after the v4 verdict per RESEARCH_NOTES_v5.md. Same stream/hash as v2/v3/v4 (554ce43f182b).",
+  "_comment": "SCCL v5 — 2x2 FACTORIAL: in-update base anchor (v4) x family-stratified RRV veto (v5). Motivation (RESEARCH_NOTES_v5.md, v4 verdict): lambda=0.1 anchor is the best plasticity arm yet (ACC 0.688, frontier +0.613, zero rollbacks) but does NOTHING for the uncertified arith holdout (0.400, identical to sccl) — that erosion lives in arith-critical directions a weak isotropic pull tolerates. Anchor and coverage are complementary: anchor trims per-update damage (helps the stream), the stratified veto keeps every certified family under gate coverage (the part the anchor cannot reach). Ladder (seeded torch_seed=42; seed=42+learner index; compare WITHIN run): 0 frozen / 1 sccl (neither; must bit-reproduce v3/v4 seed-42 ACC 0.575 arith 0.400) / 2 sccl_strat (coverage only) / 3 sccl_anchor_lo (anchor only) / 4 sccl_anchor_strat (BOTH — candidate breakthrough row) / 5 vsr_nogold (gold-test ref). Gold-free throughout: anchor target = model's own LoRA init; veto re-executes stored SELF-tests only. Same stream/hash as v2/v3/v4 (554ce43f182b). BREAKTHROUGH target: sccl_anchor_strat approaches frozen arith (~0.60) while keeping anchor-like ACC.",
   "stream": {
     "seed": 42,
     "families": [
@@ -27,7 +27,7 @@
     "vault_commit_min": 0.9,
     "vault_retrieve_k": 3,
     "vault_gate_check": 3,
-    "sccl_learners": ["sccl", "sccl_strat"],
+    "sccl_learners": ["sccl", "sccl_strat", "sccl_anchor_lo", "sccl_anchor_strat"],
     "sccl_nogate_learners": [],
     "sccl_nocons_learners": [],
     "sccl_k": 6,
@@ -50,15 +50,15 @@
     "sccl_probe_promote_age": 0,
     "sccl_nbhd_learners": [],
     "sccl_nbhd_tests": 0,
-    "sccl_anchor_learners": [],
-    "sccl_anchor_lambda": 0.0,
-    "sccl_anchor_lambdas": {},
-    "sccl_stratified_learners": ["sccl_strat"],
+    "sccl_anchor_learners": ["sccl_anchor_lo", "sccl_anchor_strat"],
+    "sccl_anchor_lambda": 0.1,
+    "sccl_anchor_lambdas": {"sccl_anchor_lo": 0.1, "sccl_anchor_strat": 0.1},
+    "sccl_stratified_learners": ["sccl_strat", "sccl_anchor_strat"],
     "self_taught_learners": ["vsr_nogold"],
     "out_dir": "runs/sccl_v5",
     "seed": 42,
     "torch_seed": 42
   },
-  "learners": ["frozen", "sccl", "sccl_strat", "vsr_nogold"],
+  "learners": ["frozen", "sccl", "sccl_strat", "sccl_anchor_lo", "sccl_anchor_strat", "vsr_nogold"],
   "out_dir": "runs/sccl_v5"
 }

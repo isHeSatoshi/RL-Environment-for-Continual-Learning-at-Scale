@@ -326,6 +326,21 @@ class SCCLStratLearner(SCCLLearner):
     name = "sccl_strat"
 
 
+class SCCLAnchorStratLearner(SCCLLearner):
+    """SCCL v5 composition row: in-update base anchor (v4, λ from
+    cfg.sccl_anchor_lambdas) AND family-stratified RRV veto (v5, via
+    cfg.sccl_stratified_learners). Rationale from the v4 verdict: the λ=0.1
+    anchor is the best plasticity arm yet (ACC 0.688, frontier +0.613) but does
+    NOTHING for the uncertified arith holdout (still 0.400), because that
+    erosion lives in arith-critical directions a weak isotropic pull tolerates.
+    Anchor and coverage are complementary: the anchor trims per-update damage
+    (helps the stream), the stratified veto keeps every certified family under
+    gate coverage (the part the anchor cannot reach). This class only supplies
+    the registry name; both mechanisms are wired name-based in env.py. Fully
+    gold-free."""
+    name = "sccl_anchor_strat"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -334,5 +349,5 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner,
                                  SCCLProbePromoteLearner, SCCLNbhdLearner,
                                  SCCLAnchorLoLearner, SCCLAnchorHiLearner,
-                                 SCCLStratLearner)}
+                                 SCCLStratLearner, SCCLAnchorStratLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

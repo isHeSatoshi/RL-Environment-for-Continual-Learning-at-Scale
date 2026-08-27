@@ -1,5 +1,5 @@
 {
-  "_comment": "SMOKE ONLY — verifies SCCL v5 family-stratified RRV veto wiring (stratified flag reaches the veto + audit trail records it + pool actually spans families) on 2 families x 2 tasks. Two learners: 'sccl' (NOT in sccl_stratified_learners -> stratified must be False, recency pool) and 'sccl_strat' (listed -> stratified True, newest-per-family pool), to verify engagement AND isolation end-to-end. Confirm via registry gate entries: sccl rows stratified=false, sccl_strat rows stratified=true. Never used for results.",
+  "_comment": "SMOKE ONLY — verifies SCCL v5 factorial wiring on the real engine with 2 families x 2 tasks. Two learners: 'sccl' (NOT in sccl_stratified_learners nor sccl_anchor_learners -> stratified must be False AND anchor_lambda must be 0.0) and 'sccl_anchor_strat' (in BOTH lists -> stratified True AND anchor_lambda 0.1), to verify the composition engages BOTH mechanisms and is isolated from the control. Confirm via registry gate entries: sccl rows {stratified=false, anchor_lambda=0.0}; sccl_anchor_strat rows {stratified=true, anchor_lambda=0.1}. Never used for results.",
   "stream": {
     "seed": 42,
     "families": [
@@ -22,7 +22,7 @@
     "use_reference_injection": false,
     "vsr_learners": [],
     "refinject_learners": [],
-    "sccl_learners": ["sccl", "sccl_strat"],
+    "sccl_learners": ["sccl", "sccl_anchor_strat"],
     "sccl_nogate_learners": [],
     "sccl_nocons_learners": [],
     "sccl_k": 6,
@@ -41,15 +41,15 @@
     "sccl_probes": 0,
     "sccl_probe_check": 0,
     "sccl_rrv_math": 0,
-    "sccl_anchor_learners": [],
-    "sccl_anchor_lambda": 0.0,
-    "sccl_anchor_lambdas": {},
-    "sccl_stratified_learners": ["sccl_strat"],
+    "sccl_anchor_learners": ["sccl_anchor_strat"],
+    "sccl_anchor_lambda": 0.1,
+    "sccl_anchor_lambdas": {"sccl_anchor_strat": 0.1},
+    "sccl_stratified_learners": ["sccl_anchor_strat"],
     "self_taught_learners": [],
     "out_dir": "runs/_smoke_v5",
     "seed": 42,
     "torch_seed": 42
   },
-  "learners": ["sccl", "sccl_strat"],
+  "learners": ["sccl", "sccl_anchor_strat"],
   "out_dir": "runs/_smoke_v5"
 }

@@ -91,6 +91,9 @@ Mechanism design (all gold-free):
 
 ## Decision rule (pre-registered, seed-42 ladder)
 
+> SUPERSEDED by the 2x2 factorial design at the bottom of this file (added after
+> the v4 verdict). Kept here as the original pre-registration for the record.
+
 Ladder: frozen / sccl (control, must bit-reproduce v3 seed-42: ACC 0.575,
 arith 0.400) / sccl_strat / vsr_nogold. Same seeded protocol (sccl index 1 →
 seed 43; sccl_strat index 2 → seed 44 — note sccl_strat draws a DIFFERENT seed
@@ -135,3 +138,66 @@ alone as the gate-side fix.
 - Per-phase arith erosion curve: instrument intermediate holdout evals
   (measurement-only, gold used ONLY as metric, never in-loop) to locate WHEN
   arith drops during the stream.
+
+## v4 VERDICT (seed-42 ladder, runs/sccl_v4) — recorded 2026-08-27
+
+Pre-registered rule: success = anchor row arith_holdout > sccl AND frontier >=
+sccl.frontier - 0.02. Result: BOTH anchor rows FAIL on arith.
+
+| learner        | ACC   | BWT    | forget | frontier | upd/rbk | arith | math  | string | drift |
+|----------------|-------|--------|--------|----------|---------|-------|-------|--------|-------|
+| frozen         | 0.613 | +0.132 | 0.025  | +0.588   | 0/0     | 0.600 | 0.250 | 0.800  | 0.800 |
+| sccl           | 0.575 | +0.095 | 0.075  | +0.500   | 17/3    | 0.400 | 0.500 | 0.800  | 0.600 |
+| sccl_anchor_lo | 0.688 | +0.207 | 0.075  | +0.613   | 16/0    | 0.400 | 0.750 | 0.800  | 0.800 |
+| sccl_anchor_hi | 0.525 | +0.045 | 0.125  | +0.400   | 14/4    | 0.200 | 0.500 | 0.800  | 0.600 |
+| vsr_nogold     | 0.637 | +0.157 | 0.125  | +0.512   | 12/4    | 0.400 | 0.750 | 0.600  | 0.800 |
+
+Determinism: sccl and vsr_nogold bit-reproduce v3 seed-42 (|d|=0.000). Audit
+trail: sccl all λ=0.0, anchor_lo all λ=0.1, anchor_hi all λ=0.5 — engagement
+and isolation confirmed on the real ladder.
+
+Two clean mechanistic findings:
+- **F1 (anchor helps stream):** λ=0.1 is the best plasticity arm we have ever
+  recorded — ACC 0.688 and frontier +0.613 BOTH exceed frozen, zero rollbacks,
+  math/drift/string all at or above sccl. A trust-region pull keeps each update
+  small enough to avoid clobbering just-certified skills, boosting acquisition
+  AND retention of the stream. λ=0.5 over-shoots: plasticity collapses
+  (ACC 0.525) and arith gets WORSE (0.200), so the benefit is non-monotone.
+- **F2 (anchor does NOT help uncertified arith):** arith-holdout is 0.400 under
+  λ=0.1 — IDENTICAL to sccl. So the arith erosion is not driven by the gross
+  cumulative LoRA drift that a global L2 pull penalizes. It lives in specific
+  arith-critical directions that a weak isotropic anchor tolerates. (λ=0.5
+  damages arith further, consistent with a strong isotropic pull perturbing
+  those same directions via the larger step.)
+
+**Conclusion:** v4's anchor and v5's coverage are complementary, not redundant.
+Anchor fixes the stream-retention side; only gate COVERAGE (or targeted
+subspace protection) can fix uncertified arith. This upgrades the staged v5 run
+from a single-mechanism test to a clean 2x2 factorial (anchor x stratified).
+
+## v5 upgraded design: 2x2 factorial (anchor x coverage)
+
+Ladder (torch_seed=42; seed = 42+learner index; compare WITHIN run):
+- 0 frozen              — control (bit-identical to v3/v4)
+- 1 sccl                — neither (bit-reproduces v3/v4 seed-42: ACC 0.575/arith 0.400)
+- 2 sccl_strat          — coverage only (v5 primary hypothesis H1)
+- 3 sccl_anchor_lo      — anchor only (re-verify v4 best arm at this seed)
+- 4 sccl_anchor_strat   — BOTH (composition; the candidate breakthrough row)
+- 5 vsr_nogold          — gold-test reference
+
+Hypotheses:
+- H1 (coverage): sccl_strat.arith > sccl.arith, frontier >= sccl - 0.02.
+- H2 (composition): sccl_anchor_strat.arith > sccl.arith AND high ACC.
+- BREAKTHROUGH target: sccl_anchor_strat approaches frozen arith (~0.60) while
+  keeping anchor-like ACC (~0.68) — solving the plasticity-stability-
+  generalization trilemma in one gold-free configuration.
+- Interaction: is anchor+stratified super-additive on frontier?
+
+Decision rule:
+- If sccl_anchor_strat hits arith >= 0.55 AND frontier >= sccl.frontier - 0.02:
+  candidate mechanism FOUND -> multi-seed (43,44) before headline claim.
+- If only sccl_strat lifts arith (no composition needed): coverage alone is the
+  fix; report anchor as stream-only helper.
+- If neither lifts arith: (G) generalization gap dominates -> targeted subspace
+  protection (Fisher-weighted anchor on arith directions / gradient
+  projection), still gold-free. Record as informative negative result.

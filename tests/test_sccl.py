@@ -1192,22 +1192,34 @@ def test_v5_stratified_pool_selection():
 
 
 def test_v5_strat_learner_registered_and_wired():
-    """sccl_strat must be a registered SCCL subclass (else experiment.py would
-    silently skip it — the v4 registry bug), and the v5 config must list it in
-    sccl_learners and sccl_stratified_learners while keeping sccl OUT of the
-    stratified list (sccl is the bit-identical recency control)."""
+    """The v5 factorial rows must be registered SCCL subclasses (else
+    experiment.py would silently skip them — the v4 registry bug), and the v5
+    config must wire the 2x2 (anchor x stratified) design exactly: sccl is the
+    neither control (recency veto, no anchor), sccl_strat coverage-only,
+    sccl_anchor_lo anchor-only, sccl_anchor_strat BOTH."""
     import json
-    from gcl.learners.learners import LEARNERS, SCCLLearner, SCCLStratLearner
-    assert issubclass(SCCLStratLearner, SCCLLearner)
+    from gcl.learners.learners import (LEARNERS, SCCLLearner, SCCLStratLearner,
+                                       SCCLAnchorLoLearner, SCCLAnchorStratLearner)
+    for cls in (SCCLStratLearner, SCCLAnchorLoLearner, SCCLAnchorStratLearner):
+        assert issubclass(cls, SCCLLearner)
     assert LEARNERS["sccl_strat"] is SCCLStratLearner
+    assert LEARNERS["sccl_anchor_strat"] is SCCLAnchorStratLearner
     v5 = json.load(open(os.path.join(os.path.dirname(__file__), "..", "configs", "sccl_v5.json")))
     exp = v5["experiment"]
-    assert "sccl_strat" in exp["sccl_learners"]
-    assert exp["sccl_stratified_learners"] == ["sccl_strat"], \
-        "only sccl_strat may opt into stratified veto; sccl must stay the recency control"
+    for n in ("sccl", "sccl_strat", "sccl_anchor_lo", "sccl_anchor_strat"):
+        assert n in exp["sccl_learners"], f"{n} missing from sccl_learners"
+    # coverage factor: exactly the two stratified rows; sccl stays recency control
+    assert set(exp["sccl_stratified_learners"]) == {"sccl_strat", "sccl_anchor_strat"}
     assert "sccl" not in exp["sccl_stratified_learners"]
-    # v4 anchor machinery must be OFF for the v5 ladder (isolate one variable)
-    assert exp["sccl_anchor_learners"] == []
+    assert "sccl_anchor_lo" not in exp["sccl_stratified_learners"]
+    # anchor factor: exactly the two anchor rows at lambda=0.1; sccl/sccl_strat off
+    assert set(exp["sccl_anchor_learners"]) == {"sccl_anchor_lo", "sccl_anchor_strat"}
+    assert exp["sccl_anchor_lambdas"] == {"sccl_anchor_lo": 0.1, "sccl_anchor_strat": 0.1}
+    assert "sccl" not in exp["sccl_anchor_learners"]
+    assert "sccl_strat" not in exp["sccl_anchor_learners"]
+    # the 2x2 must be clean: every learner appears in exactly the intended cell
+    assert v5["learners"] == ["frozen", "sccl", "sccl_strat", "sccl_anchor_lo",
+                              "sccl_anchor_strat", "vsr_nogold"]
 
 
 def test_v5_veto_default_path_unchanged():
