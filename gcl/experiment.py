@@ -106,7 +106,11 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
 
     for idx, name in enumerate(learner_names):
         if name not in LEARNERS:
-            continue
+            # Fail LOUD: a silently-skipped learner name is an instrumentation
+            # failure (the v5b smoke caught sccl_capprobe_strat being dropped
+            # here — an entire experimental cell would have gone missing).
+            raise ValueError(f"unknown learner name {name!r}; registered: "
+                             f"{sorted(LEARNERS)}")
         print(f"\n[GCL] === Starting Learner {idx + 1}/{len(learner_names)}: {name} ===", flush=True)
         cfg._learner_name = name  # also enable bounded-update knobs scoped to this learner
         _ts = int(getattr(cfg, "torch_seed", 0))
@@ -137,7 +141,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     set(getattr(cfg, "sccl_nocons_learners", [])) |
                     set(getattr(cfg, "sccl_replay_learners", [])) |
                     set(getattr(cfg, "sccl_probe_learners", [])) |
-                    set(getattr(cfg, "sccl_nbhd_learners", [])))
+                    set(getattr(cfg, "sccl_nbhd_learners", [])) |
+                    set(getattr(cfg, "sccl_capprobe_learners", [])))
         is_sccl = name in sccl_set
         certifier = None
         if is_sccl:

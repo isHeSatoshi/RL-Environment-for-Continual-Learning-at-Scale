@@ -1,5 +1,5 @@
-# Anti-contamination: EXCLUSIVE windows, no overlap. arith uses [0,12), string uses [12,24), drift uses [24,36).
 {
+  "_comment": "Anti-contamination: EXCLUSIVE windows, no overlap. arith uses [0,12), string uses [12,24), drift uses [24,36).",
   "stream": {
     "seed": 42,
     "families": [

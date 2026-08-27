@@ -341,6 +341,35 @@ class SCCLAnchorStratLearner(SCCLLearner):
     name = "sccl_anchor_strat"
 
 
+class SCCLCapProbeLearner(SCCLLearner):
+    """SCCL v5b row: capability probes. Alongside each certified skill the
+    certifier manufactures one held-out CAPABILITY probe (numeric variant +
+    majority vote for math domains; paraphrase variant + fresh self-tests for
+    code), committed as kind="cap_probe" with a newest-per-family bounded
+    pool, never trained on. The RRV veto gains a stratum that regenerates the
+    newest probe of each family before admitting an update, so an update is
+    kept only if the capability — not just the memorized instance — survives
+    it. Motivated by the v5 verdict: accepted updates kept passing stored
+    instance self-tests while holdout capability eroded (stratified arith
+    0.200; gold telemetry 11/14 accepted updates degraded the arith probe).
+    Wired via cfg.sccl_capprobe_learners / sccl_capprobes / sccl_capprobe_check
+    (experiment.py manufacture, env.py veto stratum); this class only supplies
+    the registry name. Fully gold-free."""
+    name = "sccl_capprobe"
+
+
+class SCCLCapProbeStratLearner(SCCLLearner):
+    """SCCL v5b stratified row: capability probes (v5b, via
+    cfg.sccl_capprobe_learners) AND family-stratified RRV veto pool (v5, via
+    cfg.sccl_stratified_learners). The v5 factorial showed stratification
+    alone HURTS the earliest family (arith 0.400 -> 0.200) because permanent
+    per-family INSTANCE slots admit updates that preserve instances while
+    eroding capability; pairing the stratified pool with capability-level
+    evidence is the pre-registered fix. This class only supplies the registry
+    name; both mechanisms are wired name-based. Fully gold-free."""
+    name = "sccl_capprobe_strat"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -349,5 +378,6 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLReplayLearner, SCCLProbeLearner, SCCLV2Learner,
                                  SCCLProbePromoteLearner, SCCLNbhdLearner,
                                  SCCLAnchorLoLearner, SCCLAnchorHiLearner,
-                                 SCCLStratLearner, SCCLAnchorStratLearner)}
+                                 SCCLStratLearner, SCCLAnchorStratLearner,
+                                 SCCLCapProbeLearner, SCCLCapProbeStratLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

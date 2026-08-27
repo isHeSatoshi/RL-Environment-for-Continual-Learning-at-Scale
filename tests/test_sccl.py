@@ -1239,6 +1239,44 @@ def test_v5_fixed_config_is_same_design():
     assert b["experiment"]["out_dir"] == "runs/sccl_v5_fixed"
 
 
+def test_every_config_learner_is_registered():
+    """Regression: run_experiment used to SILENTLY SKIP learner names missing
+    from the LEARNERS registry (`if name not in LEARNERS: continue`). The v5b
+    smoke caught sccl_capprobe_strat being dropped that way — an entire
+    experimental cell would have gone missing from the run with no error.
+    Every learner named in any shipped config must be registered, and the
+    runner must now fail loud on unknown names."""
+    import glob
+    import json
+    from gcl.learners.learners import LEARNERS
+    cfg_dir = os.path.join(os.path.dirname(__file__), "..", "configs")
+    bad = []
+    for path in sorted(glob.glob(os.path.join(cfg_dir, "*.json"))):
+        cfg = json.load(open(path))
+        for name in cfg.get("learners", []):
+            if name not in LEARNERS:
+                bad.append((os.path.basename(path), name))
+    assert bad == [], f"unregistered learner names in configs: {bad}"
+
+
+def test_run_experiment_rejects_unknown_learner():
+    """The dispatch loop must raise (not skip) on an unknown learner name."""
+    import inspect
+    from gcl import experiment
+    src = inspect.getsource(experiment.run_experiment)
+    # structural assertion: the guard raises ValueError instead of `continue`
+    assert "raise ValueError" in src and "unknown learner" in src
+
+
+def test_v5b_learners_registered():
+    from gcl.learners.learners import (LEARNERS, SCCLCapProbeLearner,
+                                       SCCLCapProbeStratLearner, SCCLLearner)
+    assert LEARNERS["sccl_capprobe"] is SCCLCapProbeLearner
+    assert LEARNERS["sccl_capprobe_strat"] is SCCLCapProbeStratLearner
+    assert issubclass(SCCLCapProbeLearner, SCCLLearner)
+    assert issubclass(SCCLCapProbeStratLearner, SCCLLearner)
+
+
 # ---------------------------------------------------------------------------
 # SCCL v4/v5 base anchor — ENGINE-LEVEL engagement tests.
 # The original v4 tests only checked config wiring and the audit trail, and a
