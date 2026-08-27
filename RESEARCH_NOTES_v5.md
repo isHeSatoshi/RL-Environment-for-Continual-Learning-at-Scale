@@ -457,3 +457,68 @@ post-hoc rationalization enters:
       generation (multi-step variants) or probe ensembles.
    The three diagnoses make different predictions about veto counts and the
    timing of arith erosion in family_curve; the artifacts disambiguate.
+
+---
+
+## SCCL v5b (capability probes) — VERDICT (seed 42, 2026-08-28, runs/sccl_v5b)
+
+Pipeline: launcher smoke audit PASS (cap_probes_committed=1, checked_cap gate=1,
+sccl control leak=0) after fixing TWO instrumentation bugs first (unregistered
+learner names silently skipped by run_experiment — committed 135ea35; audit
+reading gate records from the wrong file — d26a48b). Ladder rc=0 in ~3.1h.
+
+| learner             | ACC   | BWT    | Forget | Frontier | Upd/Rb | arith | math  | string | drift |
+|---------------------|-------|--------|--------|----------|--------|-------|-------|--------|-------|
+| frozen              | 0.613 | +0.132 | 0.025  | +0.588   |  0/0   | 0.600 | 0.250 | 0.800  | 0.800 |
+| sccl                | 0.575 | +0.095 | 0.075  | +0.500   | 17/3   | 0.400 | 0.500 | 0.800  | 0.600 |
+| sccl_capprobe       | 0.625 | +0.145 | 0.131  | +0.494   |  9/10  | 0.375 | 0.750 | 0.600  | 0.775 |
+| sccl_capprobe_strat | 0.694 | +0.214 | 0.131  | +0.562   | 15/9   | 0.375 | 1.000 | 0.600  | 0.800 |
+
+Verification (scripts/v5b_check.py, auto-run by watcher): frozen + sccl
+BIT-IDENTICAL to runs/sccl_v5_fixed (switch inertness + determinism); probes
+made/committed 12/12 and 15/15; gates with checked_cap>0 = 19/19 and 24/24
+(every gate after first certification re-checked probes); cap-vetoes 4 and 2;
+sccl control fully isolated. All checks passed.
+
+Pre-registered rules:
+- H1 (cap main effect): capprobe.arith = 0.375 vs sccl 0.400 -> FAIL (frontier
+  side passes: +0.494 >= +0.480). FAILS ON THE ARITH ENDPOINT AGAIN.
+- H2 (stratified cap): capprobe_strat.arith = 0.375 >= capprobe 0.375 AND
+  frontier +0.562 >= +0.480 -> PASS. First H2 pass in the v5/v5b series.
+- BREAKTHROUGH: capprobe_strat.arith = 0.375 < 0.55 -> FAIL (frontier passes).
+
+Findings:
+1. capprobe_strat is the BEST LEARNER IN THE PROJECT so far: ACC 0.694 beats
+   even the frozen baseline (0.613) — genuine absolute learning above the
+   static model; best BWT (+0.214); frontier +0.562 second only to frozen's
+   free +0.588; math PERFECT (1.000, up from 0.500 under sccl); drift 0.800
+   = frozen level. Capability probes + stratification compose into a real
+   aggregate advance (math 0.50 -> 1.00 is the largest single-family gain
+   any mechanism has produced).
+2. The probes WORK where they have coverage: every accepted update passed the
+   newest-per-family probes at its gate (24/24 checked_cap>0), and the
+   late-phase families reached their best-ever scores. The instance-vs-
+   capability gap of v5 is genuinely narrowed: instance evidence -> one
+   capability variant per family.
+3. ...but arith is STILL unprotected: 0.375 under BOTH probe rows, identical
+   endpoint from two very different gate regimes (9 vs 15 accepted updates,
+   10 vs 9 rollbacks). The arith probe existed from phase 1 and was re-checked
+   at every subsequent gate — and every accepted update passed it — yet arith
+   holdout eroded from 0.600 (frozen) to 0.375. Pre-registered tree branch (c):
+   the single variant probe is insensitive to the damaging direction.
+4. Survivorship overfit (new mechanism finding): capprobe's TRAINED arith
+   rose to 0.800 while its arith HOLDOUT fell to 0.375 (gap 0.425 vs sccl's
+   0.200). High veto pressure selects updates that fit the current instance
+   and the probe tightly; the accepted population overfits MORE than under
+   sccl. The gate is a FILTER, not a REGULARIZER: filtering reshapes the
+   accepted-update distribution toward instance-narrow survivors.
+5. Starvation cost: string fell 0.800 -> 0.600 under both probe rows (veto
+   pressure rejected string-phase updates; forgetting 0.131 vs sccl 0.075).
+
+Reading: v5b converts the v5 diagnosis into the strongest aggregate learner
+yet (ACC 0.694, math 1.000) and validates capability-level evidence as the
+right DIRECTION, but one held-out variant per family is too thin a witness:
+it passes while broad capability erodes (branch c), and veto pressure itself
+degrades the accepted-update distribution (finding 4). Per the pre-registered
+decision tree, next step is Branch D, informed by the adapter-level gold
+telemetry (which accepted update broke arith, and did the probe really pass).
