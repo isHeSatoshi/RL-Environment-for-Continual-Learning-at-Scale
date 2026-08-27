@@ -354,3 +354,65 @@ variants + fresh self-tests for string/drift — and let the pool take the
 newest cap_probe per family. This also tests whether the instance-vs-
 capability gap is a general phenomenon (v5 telemetry shows string/drift
 holdouts also dip under sccl, just less catastrophically than arith).
+
+---
+
+## v5 CORRECTED FACTORIAL — VERDICT (seed 42, engaged anchor, commit e53923a code)
+
+Run: configs/sccl_v5_fixed.json -> runs/sccl_v5_fixed (runner exec_11de2e72).
+Same stream hash 554ce43f182b. Final per-family holdout (arith/math/string/drift)
++ frontier score:
+
+| learner          | arith | math | string | drift | frontier | ACC   | upd/rbk | BWT     | forget |
+|------------------|-------|------|--------|-------|----------|-------|---------|---------|--------|
+| frozen           | 0.600 | 0.250| 0.800  | 0.800 | +0.588   | -     | 0/0     | -       | -      |
+| sccl             | 0.400 | 0.500| 0.800  | 0.600 | +0.500   | 0.575 | 17/3    | -       | -      |
+| sccl_strat       | 0.200 | 1.000| 0.800  | 0.800 | +0.575   | 0.700 | 14/4    | -       | -      |
+| sccl_anchor_lo   | 0.400 | 0.750| 0.800  | 0.800 | +0.613   | 0.688 | 19/1    | +0.2073 | 0.075  |
+| sccl_anchor_strat| 0.400 | 0.750| 0.800  | 0.800 | +0.613   | 0.688 | 11/7    | +0.207  | 0.075  |
+| vsr_nogold       | (in flight at time of writing)                                        |
+
+Anchor ENGAGEMENT audit (first real anchor measurements in this repo):
+- anchor_lo: 19/19 accepted updates with anchor_pen > 0 (min 0.5726, mean
+  1.5974, max 4.1245), lambdas exactly {0.1}.
+- anchor_strat: 11/11 accepted with pen > 0 (min 0.7598, mean 1.3836, max
+  2.9918), lambdas {0.1}.
+- Negative control sccl_strat: 7/7 accepted with lam=0.0, pen=0.0 (inert path
+  unchanged). Determinism: frozen/sccl/sccl_strat rows bit-reproduce the first
+  flight on all computed metrics (wallclock/paths/timestamps only differ).
+
+Pre-registered rule outcomes:
+- H1 (stratified coverage): sccl_strat.arith = 0.200 <= sccl.arith = 0.400.
+  FAIL. (Frontier condition +0.575 >= +0.480 passes, but the primary endpoint
+  fails.) Stratification HURTS arith: with per-family instance slots always
+  checked, arith instances keep passing while arith capability degrades, so
+  MORE arith-breaking updates are admitted than under the unstratified pool
+  (where late-phase pools are dominated by non-arith skills and some
+  arith-breaking updates get coincidentally vetoed for also breaking a recent
+  skill). This is direct evidence for the instance-vs-capability gap (Branch C).
+- H2 (anchor main effect): anchor_lo.arith = 0.400 = sccl.arith. FAIL on the
+  arith endpoint. Anchor DOES help elsewhere: math 0.50 -> 0.75, drift
+  0.60 -> 0.80, frontier +0.500 -> +0.613, rollbacks 3 -> 1, forgetting 0.075,
+  BWT +0.207. The quadratic anchor preserves base-model capability broadly but
+  cannot hold the FIRST family once later-phase training proceeds.
+- BREAKTHROUGH (composition): sccl_anchor_strat.arith = 0.400 < 0.55. FAIL
+  (frontier +0.613 >= +0.480 passes). Notably anchor_strat lands on the SAME
+  final per-family vector and frontier as anchor_lo ([0.4, 0.75, 0.8, 0.8],
+  +0.613) via a different path (11 accepted/7 rollbacks vs 19/1): the anchor
+  neutralizes the stratification harm to arith (0.2 -> 0.4) but adds nothing
+  on top of it.
+
+Reading: the anchor is real, engaged, and beneficial (best frontier, best BWT,
+lowest forgetting in the ladder), but no cell cracks the arith endpoint. The
+bottleneck is now unambiguously the gate's INSTANCE-level check: accepted
+updates keep passing stored self-tests while holdout capability erodes
+(sccl_strat@44 telemetry: 11/14 accepted updates degraded the arith gold
+probe). Gold says so, and the gate's own artifacts agree - the gate is
+admitting capability-loss updates because it only re-verifies instances.
+
+Pre-registered next step fires: v5b capability probes (this file, Branch C
+draft + refinement above). configs/sccl_v5b.json committed (6cab00c);
+implementation committed (51ffada); 279 tests pass; all switches default OFF.
+Launch after vsr_nogold completes + verdict_check.md confirms + sole GPU
+ownership. Pre-registered v5b success rule unchanged: capprobe_strat
+arith >= 0.55 AND frontier >= sccl - 0.02 -> multi-seed before headline claim.
