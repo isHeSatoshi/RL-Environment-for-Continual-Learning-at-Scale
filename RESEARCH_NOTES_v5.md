@@ -416,3 +416,44 @@ implementation committed (51ffada); 279 tests pass; all switches default OFF.
 Launch after vsr_nogold completes + verdict_check.md confirms + sole GPU
 ownership. Pre-registered v5b success rule unchanged: capprobe_strat
 arith >= 0.55 AND frontier >= sccl - 0.02 -> multi-seed before headline claim.
+
+---
+
+## POST-v5b DECISION TREE (pre-registered 2026-08-28, before v5b ladder results)
+
+The v5b ladder (frozen / sccl / sccl_capprobe / sccl_capprobe_strat, seed 42)
+is running. Whatever it returns, the next move is fixed here so no
+post-hoc rationalization enters:
+
+1. BREAKTHROUGH PASS (capprobe_strat.arith >= 0.55 AND frontier >= sccl-0.02):
+   -> run scripts/v5b_multiseed.py (seeds 43/44; snapshot 42 -> _s42).
+   -> headline claim only if arith mean >= 0.55 across seeds AND every seed
+      individually >= sccl_seed - 0.05 on arith (no single-seed rescue).
+   -> paper sec:v5b "Results: pending" filled with the multi-seed table;
+      v5's instance-vs-capability framing becomes the paper's central arc.
+
+2. H1 PASS only (capprobe.arith > sccl.arith, stratified row does not add):
+   -> capability probes are the fix; stratification remains harmful/neutral
+      even over capability evidence. Write-up: probes are the contribution,
+      stratification is a confirmed dead end (two independent factorials).
+   -> Branch D = probes + anchor composition (anchor helped math/drift in v5;
+      probes target arith; likely additive). Pre-register the 2x2 before run.
+
+3. FAIL on arith again (both probe rows <= sccl on arith):
+   Diagnose from artifacts BEFORE designing Branch D:
+   a) probe fragility: cap probes veto too aggressively -> high rrv_vetoes,
+      low updates_used_pct, frontier collapse. Fix: loosen tau on the cap
+      stratum only, or require k-of-n probe agreement.
+   b) uncertified capability: arith erodes BEFORE any arith skill is
+      certified, so no arith probe exists when the damage happens (the gate
+      cannot protect what it never saw). Evidence: checked_cap=0 gates during
+      the arith-erosion window in trajectories jsonl. Fix: manufacture probes
+      at FIRST CONTACT with a family, not at certification (Branch D leading
+      candidate — extends coverage to the pre-certification window).
+   c) cross-family interference: probes exist and pass pre-update, but the
+      update passes the check yet still erodes (probe insensitive to the
+      damaging direction). Evidence: checked_cap>0 gates whose post-update
+      gold telemetry still shows arith degradation. Fix: harder probe
+      generation (multi-step variants) or probe ensembles.
+   The three diagnoses make different predictions about veto counts and the
+   timing of arith erosion in family_curve; the artifacts disambiguate.
