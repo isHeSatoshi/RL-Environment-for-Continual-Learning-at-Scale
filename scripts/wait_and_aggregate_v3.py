@@ -68,6 +68,9 @@ while True:
     if elapsed >= MAX_WAIT:
         print("WATCHER-TIMEOUT after %ds -- seed-44 metrics still missing" % elapsed, flush=True)
         sys.exit(3)
+    if elapsed % 1800 < INTERVAL:  # heartbeat every ~30 min
+        print("[watcher] waiting: elapsed=%ds orchestrator=%s seed44_metrics=%s"
+              % (elapsed, n, os.path.exists(M44)), flush=True)
     time.sleep(INTERVAL)
     elapsed += INTERVAL
 
