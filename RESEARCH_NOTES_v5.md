@@ -296,6 +296,23 @@ the seed-matched controls that already existed in runs/sccl_v3_seeds. The
 correction strengthens the paper: the trilemma result, if it survives the
 corrected factorial, rests on an engagement-tested mechanism.
 
+**Ops post-mortem: the double-launch (same day).** The corrected factorial
+was staged behind a polling wrapper (v5_fixed_launcher.sh: wait for the first
+flight's metrics.json, then launch). The wrapper's first launch via `nohup
+... &` appeared to die but DID NOT; the re-launch via the background task
+created a SECOND wrapper. Both polled the same trigger, both fired runners
+into the SAME out_dir concurrently. One runner segfaulted (rc=139) under GPU
+contention (~15.5/16 GB in use with both models resident); the survivor's
+output was contaminated by interleaved writes. Recovery: kill the whole
+process tree (verify parentage via Win32_Process before killing — the nohup
+tree was launcher 34672 -> bash 3960 -> python 54908), wipe runs/sccl_v5_fixed,
+re-launch EXACTLY ONE runner directly (no polling wrapper; the trigger file
+already existed). Rules going forward: (1) never use polling wrappers to chain
+runs — launch directly; (2) before launching a GPU runner, enumerate python
+processes and confirm sole ownership of the GPU; (3) a watcher that only READS
+completion artifacts (like v5_fixed_check_watcher.sh, which runs the verdict
+script when metrics.json settles) is safe because it cannot double-launch.
+
 ## v5b DESIGN DRAFT — capability probes (Branch C; implement only if the
 ## corrected factorial still fails the arith endpoint)
 
