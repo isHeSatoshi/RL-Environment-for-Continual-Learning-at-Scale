@@ -327,3 +327,13 @@ Predictions:
   measurable in updates-accepted and ACC.
 - Pre-registered success: arith >= 0.55 AND frontier >= sccl - 0.02, then
   multi-seed.
+
+Refinement (review while corrected factorial runs): mechanisms 1 and 3 are
+inconsistent as drafted — manufacture is restricted to arith-family skills,
+but the stratified pool expects "the newest cap_probe of EACH family". Resolve
+by domain, mirroring v3 CheckNbhd: manufacture cap_probes for ALL certified
+skills — numeric variants + majority vote for arith/math_word, paraphrase
+variants + fresh self-tests for string/drift — and let the pool take the
+newest cap_probe per family. This also tests whether the instance-vs-
+capability gap is a general phenomenon (v5 telemetry shows string/drift
+holdouts also dip under sccl, just less catastrophically than arith).
