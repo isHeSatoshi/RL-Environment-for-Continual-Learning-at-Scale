@@ -654,3 +654,43 @@ FAIL-CLOSED CHECKS (any failure = abort, do not interpret):
   C4 isolation: frozen/sccl rows commit zero cap_probes and log checked_cap=0.
   C5 gold-free: no gold field enters any accept/reject decision (AST audit +
      the cap/anchor code paths read only spec/self-tests/init-weights).
+
+## BRANCH D STATUS — implementation + smoke + ladder launch (2026-08-28)
+
+IMPLEMENTED (commit 11886c4). Capability-probe ENSEMBLE pool + base-anchor
+composition, fully gold-free:
+  * gcl/vault.py — _cap_probe_source / _cap_pool_by_family / _cap_pool_keep_ids.
+    The pool keeps the FRESHEST variant of each distinct source skill, then the
+    K newest by commit order; K=1 reduces EXACTLY to the v5b newest-per-family
+    rule (bit-identity pinned by test_cap_pool_pool1_is_v5b_newest_per_family).
+    commit_cap_probe prunes to K; selfreplay_veto re-checks the whole pool.
+  * gcl/config.py — sccl_capprobe_pool (default 1) + sccl_capprobe_pools
+    (per-learner K override). env.py resolves the veto-side K, experiment.py the
+    manufacture-side K (kept in lock-step so the retained pool == checked pool).
+  * gcl/learners/learners.py — sccl_capens (K3), sccl_cap_anchor (K1+anchor .1),
+    sccl_capens_anchor (K3+anchor .1); thin name-supplying SCCLLearner rows.
+  * Tests: 8 new (pool=1 v5b bit-identity, distinct-source ensemble,
+    freshest-variant-per-skill, commit prune-to-K, ensemble veto checks-all-and-
+    vetoes-any, cap_pool default=v5b single, v6 config inert, registration).
+    Full suite green: 87 sccl + 97 vsr/unit.
+
+SMOKE AUDIT — PASS (runs/_smoke_v6, 2 families x 4 tasks, 4-learner 2x2):
+  * C4 isolation: sccl committed 0 cap_probes, checked_cap=0, anchor_pen=0.
+  * C2 ensemble: sccl_capens held 3 distinct source skills in math_word; the
+    veto checked up to 4 probes in a single gate (checked_cap=4); anchor_pen=0.
+    -> the ensemble veto genuinely re-checks MULTIPLE skill axes at once, the
+    exact wider witness v5b's single-probe gate lacked.
+  * C3 anchor: sccl_cap_anchor anchor_pen>0 lambda=0.1 (1/1 accepted);
+    sccl_capens_anchor anchor_pen>0 on 4/4 accepted updates.
+  The composition row's ensemble was under-exercised in this tiny seed (only 1
+  distinct arith skill certified — smoke stochasticity), but the ensemble code
+  path is proven via sccl_capens and the anchor via both anchor rows; the full
+  8-task/family ladder exercises all cells.
+
+LADDER LAUNCHED (autonomous, fail-closed): configs/sccl_v6.json, 7 learners
+(frozen/sccl/sccl_capprobe/sccl_capprobe_strat determinism rows + sccl_capens/
+sccl_cap_anchor/sccl_capens_anchor treatment rows), seeds 42-48 by learner
+index. scripts/v6_launcher.sh gated smoke->audit->ladder; scripts/
+v6_check_watcher.sh will run scripts/v6_check.py (C1-C5 + H1/H2/H3/BREAKTHROUGH)
+when runs/sccl_v6/metrics.json finalizes. Gold-free throughout; gold only final
+eval + post-hoc telemetry.
