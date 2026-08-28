@@ -150,6 +150,18 @@ class ExperimentConfig:
     sccl_cap_retain_mins: dict = field(default_factory=dict)
     sccl_cap_samples: int = 0
     sccl_cap_samples_map: dict = field(default_factory=dict)
+    # ---- SCCL v8 (Branch F, G1): generalization witnesses ----
+    # v7 telemetry (F5/F8): rate-level thresholds over certified-skill probes
+    # are inert — every gold-erosion update passed its probes at pooled rate
+    # 1.0 because certified-skill probes test REPRODUCTION while erosion hits
+    # GENERALIZATION to new instances. G1 manufactures cap probes from
+    # UNTRAINED future stream tasks (spec-only certify, committed as
+    # "<task>:g"), retired the moment their source task enters training.
+    # sccl_genprobes = live gen witnesses kept per family (dedicated pool
+    # lane, never evicted by certified probes); 0 = off (bit-identical).
+    # Pre-registered in RESEARCH_NOTES_v5.md (Branch F).
+    sccl_genprobe_learners: List[str] = field(default_factory=list)
+    sccl_genprobes: int = 0
     # output
     out_dir: str = "runs/run"
     seed: int = 42

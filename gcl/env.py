@@ -319,6 +319,13 @@ class GroundedContinualEnv:
             cap_samples = (int(_csamps.get(
                 name, getattr(self.cfg, "sccl_cap_samples", 0)))
                 if cap_learner else 0)
+            # ---- SCCL v8 (Branch F, G1): generalization-witness lane. Only
+            # genprobe learners resolve a non-zero lane; all other rows keep
+            # the exact v5b/v6/v7 pool (bit-identical). ----
+            cap_gen_pool = (int(getattr(self.cfg, "sccl_genprobes", 0))
+                            if (cap_learner and name in set(
+                                getattr(self.cfg, "sccl_genprobe_learners", [])))
+                            else 0)
             cap_margin = 0
             cap_armed = False
             if cap_check > 0 and task is not None:
@@ -343,7 +350,8 @@ class GroundedContinualEnv:
                 cap_margin=cap_margin,
                 cap_pool=cap_pool,
                 cap_retain_min=cap_retain_min,
-                cap_samples=cap_samples)
+                cap_samples=cap_samples,
+                cap_gen_pool=cap_gen_pool)
             if cap_check > 0:
                 self._cap_attempts += 1
                 if veto["veto"] and veto.get("broke_cap"):
@@ -366,6 +374,12 @@ class GroundedContinualEnv:
                 gate["cap_retain_min"] = cap_retain_min
                 gate["cap_n"] = (cap_samples if cap_samples > 0
                                  else int(getattr(self.cfg, "sccl_replay_samples", 2)))
+            if cap_gen_pool > 0:
+                # G1 engagement telemetry (v8): gen-witness lane size + the
+                # exact probes each gate checked (':g' witnesses appear by
+                # task_id), audited by v8_check C2/C3.
+                gate["cap_gen_pool"] = cap_gen_pool
+                gate["checked_cap_ids"] = veto.get("checked_cap_ids", [])
             accepted = not veto["veto"]
             # ---- Gold telemetry ONLY (post-hoc gate-agreement analysis). ----
             # These scores never enter `accepted`; they let the paper quantify
@@ -617,9 +631,10 @@ class GroundedContinualEnv:
                                "gate_accepted": update_info.get("accepted", None)}
                               if mode == "sccl" else {})}
         # Propagate per-step audit fields the experiment attached to the action
-        # (v3 neighborhood verdict, v2 probe manufacture). Telemetry only —
-        # neither field influenced the step's decision.
-        for _k in ("sccl_nbhd", "sccl_probe"):
+        # (v3 neighborhood verdict, v2 probe manufacture, v8 generalization
+        # witness manufacture). Telemetry only — no field influenced the
+        # step's decision.
+        for _k in ("sccl_nbhd", "sccl_probe", "sccl_gen_probe"):
             if action.metadata and _k in action.metadata:
                 step_info[_k] = action.metadata[_k]
         return o, reward, self.done, step_info

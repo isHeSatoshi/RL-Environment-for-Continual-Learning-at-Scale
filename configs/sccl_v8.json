@@ -1,0 +1,148 @@
+{
+  "_comment": "SCCL v8 (Branch F of RESEARCH_NOTES_v5.md, G1 pre-registered BEFORE any v8 run, section 'BRANCH F PRE-REGISTRATION — G1 GENERALIZATION WITNESSES (v8 ladder)'): GENERALIZATION witnesses. Motivation: v7 verdict (F5/F6/F7/F8) — rate-level probe BLINDNESS: every gold erosion passed its probes at pooled rate 1.0 because certified-skill cap probes live on the memorized manifold and witness REPRODUCTION, while the erosion lives on the GENERALIZATION axis; the binding constraint is witness COVERAGE, not sensitivity (E1) or width (K=3). G1 manufactures cap probes from UNTRAINED FUTURE stream tasks via the existing gold-free spec-only certify path: at FIRST CONTACT with a family, manufacture G=1 probe from the next untrained task (task_id '<tid>:g', kind=cap_probe, dedicated pool lane never evicted by certified probes); RETIRE the probe before its source task trains (it would degrade to a reproduction witness); REFRESH from the next untrained task after retirement. The gate re-checks gen witnesses with the reused E1 rate machinery (cap_retain_min/cap_samples, margin recheck denominators {3,5}). LADDER (seed = torch_seed 42 + learner index; idx0..idx3 are the exact v5b/v6/v7 determinism prefix and must bit-match runs/sccl_v7 idx0..idx3): 0 frozen, 1 sccl, 2 sccl_capprobe (K=1, theta=0), 3 sccl_capprobe_strat (K=1, theta=0 — reproducible capability baseline, arith 0.375), 4 sccl_genprobe (strat + G=1 gen witnesses, K=1, theta=0 legacy any-pass on the joint pool — coverage main effect), 5 sccl_genprobe_strict (G=1 + theta=1.0 n=3 — coverage + sensitivity), 6 sccl_genprobe_strict_anchor (G=1 + theta=1.0 n=3 + anchor lambda=0.1 — the composition/breakthrough cell). PRE-REGISTERED RULES: H1 coverage main effect (genprobe.arith > 0.375); H2 coverage+sensitivity (genprobe_strict.arith >= max(0.375, genprobe.arith) AND accepted updates >= 5, anti-stall guard); H3 composition (genprobe_strict_anchor arith AND ACC >= max of gen rows, degenerate rows excluded); M1 mechanism telemetry (gen-witness sensitivity: fraction of probe-checked gold erosions with a ':g' break or pooled gen rate < theta; v7 baseline 0%; target > 50%; recorded by scripts/v8_telemetry.py, not gated); BREAKTHROUGH genprobe_strict_anchor arith >= 0.55 AND frontier >= sccl.frontier - 0.02 AND accepted updates >= 5 -> multi-seed (43/44 via scripts/v8_multiseed.py) BEFORE any headline. DEGENERACY GUARD: a theta>0 gen row with < 5 accepted updates is degenerate (veto stall / witness too harsh — a dose finding, recorded, not an abort) and excluded from maxima; a degenerate breakthrough cell forces BREAKTHROUGH = FAIL. FAIL-CLOSED C1-C5 enforced by scripts/v8_check.py (C1 determinism vs runs/sccl_v7 prefix; C2 engagement: gen probe manufactured at first contact + ':g' ids in gate checked_cap_ids/cap_rates + logged dose == config; C3 retirement/anti-contamination: no ':g' from task T checked during/after T's training, ':g' sources disjoint from gold holdout task ids; C4 isolation: zero gen activity on prefix rows, no E1 fields on theta=0 rows, anchor engaged on the anchor row; C5 gold-free AST audit extended to the manufacture path). Same stream hash 554ce43f182b, torch_seed=42, gold-free throughout (gold only final eval + post-hoc telemetry).",
+  "stream": {
+    "seed": 42,
+    "families": [
+      {
+        "corpus": "mbpp",
+        "name": "arith",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "math",
+        "name": "math_word",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "mbpp",
+        "name": "string",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 12
+      },
+      {
+        "corpus": "mbpp",
+        "name": "drift",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 24,
+        "drift": {
+          "kind": "spec_perturb"
+        }
+      }
+    ]
+  },
+  "experiment": {
+    "model_name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "learning_rate": 0.0003,
+    "train_steps_per_update": 4,
+    "max_updates": 60,
+    "temperature": 0.1,
+    "max_new_tokens": 256,
+    "gate_epsilon": 0.05,
+    "holdout_size": 8,
+    "use_vsr_gate": true,
+    "use_reference_injection": true,
+    "vsr_learners": [
+      "vsr"
+    ],
+    "refinject_learners": [
+      "vsr"
+    ],
+    "vault_commit_min": 0.9,
+    "vault_retrieve_k": 3,
+    "vault_gate_check": 3,
+    "sccl_learners": [
+      "sccl",
+      "sccl_capprobe",
+      "sccl_capprobe_strat",
+      "sccl_genprobe",
+      "sccl_genprobe_strict",
+      "sccl_genprobe_strict_anchor"
+    ],
+    "sccl_nogate_learners": [],
+    "sccl_nocons_learners": [],
+    "sccl_k": 6,
+    "sccl_temp": 0.8,
+    "sccl_test_bags": 2,
+    "sccl_tests_per_bag": 4,
+    "sccl_tau": 0.65,
+    "sccl_tau_math": 0.6,
+    "sccl_derive_entry": true,
+    "sccl_replay_check": 3,
+    "sccl_replay_samples": 2,
+    "sccl_gate_probe": 4,
+    "sccl_replay_learners": [],
+    "sccl_replay_k": 0,
+    "sccl_probe_learners": [],
+    "sccl_probes": 0,
+    "sccl_probe_check": 0,
+    "sccl_rrv_math": 0,
+    "sccl_probe_promote_learners": [],
+    "sccl_probe_promote_age": 0,
+    "sccl_nbhd_learners": [],
+    "sccl_nbhd_tests": 0,
+    "sccl_anchor_learners": [
+      "sccl_genprobe_strict_anchor"
+    ],
+    "sccl_anchor_lambda": 0.0,
+    "sccl_anchor_lambdas": {
+      "sccl_genprobe_strict_anchor": 0.1
+    },
+    "sccl_stratified_learners": [
+      "sccl_capprobe_strat",
+      "sccl_genprobe",
+      "sccl_genprobe_strict",
+      "sccl_genprobe_strict_anchor"
+    ],
+    "sccl_capprobe_learners": [
+      "sccl_capprobe",
+      "sccl_capprobe_strat",
+      "sccl_genprobe",
+      "sccl_genprobe_strict",
+      "sccl_genprobe_strict_anchor"
+    ],
+    "sccl_capprobes": 1,
+    "sccl_capprobe_check": 4,
+    "sccl_capprobe_budget": 0.5,
+    "sccl_capprobe_margin": 2,
+    "sccl_capprobe_pool": 1,
+    "sccl_capprobe_pools": {},
+    "sccl_cap_retain_min": 0.0,
+    "sccl_cap_retain_mins": {
+      "sccl_genprobe_strict": 1.0,
+      "sccl_genprobe_strict_anchor": 1.0
+    },
+    "sccl_cap_samples": 0,
+    "sccl_cap_samples_map": {
+      "sccl_genprobe_strict": 3,
+      "sccl_genprobe_strict_anchor": 3
+    },
+    "sccl_genprobe_learners": [
+      "sccl_genprobe",
+      "sccl_genprobe_strict",
+      "sccl_genprobe_strict_anchor"
+    ],
+    "sccl_genprobes": 1,
+    "self_taught_learners": [],
+    "out_dir": "runs/sccl_v8",
+    "seed": 42,
+    "torch_seed": 42
+  },
+  "learners": [
+    "frozen",
+    "sccl",
+    "sccl_capprobe",
+    "sccl_capprobe_strat",
+    "sccl_genprobe",
+    "sccl_genprobe_strict",
+    "sccl_genprobe_strict_anchor"
+  ],
+  "out_dir": "runs/sccl_v8"
+}

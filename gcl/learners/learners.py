@@ -463,6 +463,50 @@ class SCCLEnsStrictAnchorLearner(SCCLLearner):
     name = "sccl_ens_strict_anchor"
 
 
+class SCCLGenProbeLearner(SCCLLearner):
+    """SCCL v8 (Branch F, G1) coverage row: GENERALIZATION witnesses. v7
+    telemetry (F5/F8) proved rate-level thresholds over certified-skill
+    probes inert — every gold-erosion update passed its probes at pooled
+    rate 1.0, because certified-skill probes test REPRODUCTION of solved
+    tasks while erosion hits GENERALIZATION to new instances of the family.
+    G1 manufactures cap probes from UNTRAINED future stream tasks at FIRST
+    CONTACT with each family (spec-only certify — the same gold-free path as
+    v5b; never a gold field, never a holdout task), commits them as
+    kind="cap_probe" with task_id suffix ':g' into a DEDICATED pool lane
+    (cfg.sccl_genprobe_learners / sccl_genprobes, wired in experiment.py +
+    vault.py), and RETIRES each witness before its source task trains. The
+    veto's cap stratum re-checks them with the SAME legacy any-pass rule as
+    sccl_capprobe_strat (theta=0): the only change vs that row is witness
+    coverage, isolating the coverage main effect (H1). Fully gold-free."""
+    name = "sccl_genprobe"
+
+
+class SCCLGenProbeStrictLearner(SCCLLearner):
+    """SCCL v8 (Branch F, G1) coverage+sensitivity row: generalization
+    witnesses (G=1 per family, ':g' lane) UNDER the strict pass-rate veto
+    (theta=1.0, n=3 draws, pooled-rate margin recheck — the validated E1
+    machinery of v7). v7 showed strictness over BLIND witnesses trades 1:1
+    against plasticity with zero erosion gain (F6); over witnesses that CAN
+    see the damage axis, strict vetoes should fall on damaging updates, not
+    on useful learning. Pre-registered anti-stall guard: < 5 accepted
+    updates marks the row degenerate (excluded from maxima). Fully
+    gold-free."""
+    name = "sccl_genprobe_strict"
+
+
+class SCCLGenProbeStrictAnchorLearner(SCCLLearner):
+    """SCCL v8 (Branch F, G1) composition row — the pre-registered
+    breakthrough candidate: generalization witnesses (coverage, attacks the
+    binding constraint named by v7's mechanism conclusion) + strict
+    pass-rate veto (theta=1.0, n=3 — sensitivity over the now-seeing
+    witness) + in-update base anchor (lambda=0.1 — bounds per-update drift
+    on axes no witness inspects; v7 F7 showed the anchor row's single
+    accepted update held arith at the frozen level). Pre-registered rule:
+    arith >= 0.55 AND frontier >= sccl - 0.02 AND >= 5 accepted updates ->
+    multi-seed before headline. Fully gold-free."""
+    name = "sccl_genprobe_strict_anchor"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -476,5 +520,7 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLCapEnsLearner, SCCLCapAnchorLearner,
                                  SCCLCapEnsAnchorLearner,
                                  SCCLStrictLearner, SCCLMajorityLearner,
-                                 SCCLEnsStrictLearner, SCCLEnsStrictAnchorLearner)}
+                                 SCCLEnsStrictLearner, SCCLEnsStrictAnchorLearner,
+                                 SCCLGenProbeLearner, SCCLGenProbeStrictLearner,
+                                 SCCLGenProbeStrictAnchorLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

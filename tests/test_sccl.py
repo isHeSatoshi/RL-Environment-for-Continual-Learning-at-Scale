@@ -1967,3 +1967,254 @@ def test_v7_learners_registered():
     for cls in (SCCLStrictLearner, SCCLMajorityLearner,
                 SCCLEnsStrictLearner, SCCLEnsStrictAnchorLearner):
         assert issubclass(cls, SCCLLearner)
+
+
+# ---------------------------------------------------------------------------
+# SCCL v8 (Branch F, G1): generalization witnesses.
+# v7 telemetry (F5/F8): certified-skill probes live on the memorized manifold
+# — every erosion passed at the pooled rate because the witnesses only test
+# REPRODUCTION of trained skills. G1 manufactures witnesses from UNTRAINED
+# future stream tasks via spec-only certify (task_id suffix ':g'), checks them
+# with the same E1 rate machinery, keeps them in a DEDICATED pool lane, and
+# RETIREs each witness before its source task enters training (it would
+# degrade to a reproduction witness and contaminate the coverage claim).
+# These tests pin:
+#   (a) the two-lane pool: ':g' slots are never evicted by certified commits,
+#   (b) gen_pool=0 executes the exact legacy pool (bit-identity),
+#   (c) retire_cap_probe removes the exact task_id,
+#   (d) the veto re-checks ':g' witnesses, vetoes on break, reports rates and
+#       emits checked_cap_ids ONLY when cap_gen_pool>0,
+#   (e) default-config inertness + learner registration,
+#   (f) env wiring persists cap_gen_pool + checked_cap_ids on gen rows only.
+# ---------------------------------------------------------------------------
+
+
+def test_cap_pool_gen_lane_dedicated():
+    """The ':g' lane is dedicated: certified commits never evict a gen
+    witness, and the gen lane keeps the newest gen_pool per family."""
+    v = SelfCertVault()
+    assert v.commit_cap_probe("A:c0", "famA", "spec A", "PROMPT MA\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    assert v.commit_cap_probe("g1:g", "famA", "spec g1", "PROMPT G1\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    assert v.commit_cap_probe("g2:g", "famA", "spec g2", "PROMPT G2\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    pool = v._cap_pool_by_family(1, gen_pool=1)["famA"]
+    assert [s.task_id for s in pool] == ["A:c0", "g2:g"], \
+        "certified lane first (newest skill), then the newest gen witness"
+    # a newer certified skill replaces the older one; the gen lane is untouched
+    assert v.commit_cap_probe("B:c0", "famA", "spec B", "PROMPT MB\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    pool = v._cap_pool_by_family(1, gen_pool=1)["famA"]
+    assert [s.task_id for s in pool] == ["B:c0", "g2:g"]
+    ids = {s.task_id for s in v._skills if getattr(s, "kind", "") == "cap_probe"}
+    assert "g2:g" in ids, "a certified commit must never evict a ':g' witness"
+    assert "g1:g" not in ids, "the gen lane evicts oldest-first on its own"
+
+
+def test_cap_pool_gen_pool_zero_is_exact_legacy():
+    """gen_pool=0 executes the exact pre-v8 rule (bit-identity for all
+    pre-v8 rows): a ':g' id, if present, is grouped like any other distinct
+    source skill instead of getting a dedicated lane."""
+    v = SelfCertVault()
+    for tid in ("A:c0", "B:c0"):
+        assert v.commit_cap_probe(tid, "famA", f"spec {tid}",
+                                  f"PROMPT {tid}\n```python\n",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                                  pool=99, gen_pool=99)
+    assert v.commit_cap_probe("g1:g", "famA", "spec g1", "PROMPT g1\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=99, gen_pool=99)
+    legacy = v._cap_pool_by_family(2)            # gen_pool defaults to 0
+    explicit = v._cap_pool_by_family(2, 0)
+    assert [s.task_id for s in legacy["famA"]] == \
+        [s.task_id for s in explicit["famA"]]
+    assert [s.task_id for s in legacy["famA"]] == ["B:c0", "g1:g"], \
+        "legacy rule: newest 2 distinct sources by commit order"
+    # the two-lane read keeps BOTH certified skills PLUS the gen witness
+    two_lane = v._cap_pool_by_family(2, gen_pool=1)
+    assert [s.task_id for s in two_lane["famA"]] == ["A:c0", "B:c0", "g1:g"]
+
+
+def test_retire_cap_probe_removes_exact_id():
+    """Retirement removes exactly the cap probe whose source task entered
+    training — the anti-contamination step of the G1 protocol."""
+    v = SelfCertVault()
+    assert v.commit_cap_probe("A:c0", "famA", "spec A", "PROMPT A\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=3, gen_pool=2)
+    assert v.commit_cap_probe("g1:g", "famA", "spec g1", "PROMPT g1\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=3, gen_pool=2)
+    assert v.commit_cap_probe("g2:g", "famA", "spec g2", "PROMPT g2\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=3, gen_pool=2)
+    assert v.retire_cap_probe("g1:g") is True
+    ids = [s.task_id for s in v._skills if getattr(s, "kind", "") == "cap_probe"]
+    assert ids == ["A:c0", "g2:g"], "exact-id removal, other probes untouched"
+    pool = v._cap_pool_by_family(3, gen_pool=2)["famA"]
+    assert [s.task_id for s in pool] == ["A:c0", "g2:g"]
+    assert v.retire_cap_probe("g1:g") is False    # already retired
+    assert v.retire_cap_probe("nope:g") is False  # unknown id
+
+
+def test_rrv_gen_probe_checked_and_vetoes():
+    """The veto re-checks the ':g' lane: a broken gen witness vetoes and is
+    named; checked_cap_ids is emitted ONLY when cap_gen_pool>0."""
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    assert v.commit_cap_probe("A:c0", "famA", "spec A", "PROMPT MA\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    assert v.commit_cap_probe("gsrc:g", "famA", "spec g", "PROMPT MG\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    eng = _PerPromptEngine(break_marker=None)
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=1, cap_gen_pool=1)
+    assert not res["veto"] and res["checked_cap"] == 2, res
+    assert res["checked_cap_ids"] == ["A:c0", "gsrc:g"], \
+        "certified lane checked first, then the gen lane, in check order"
+    # break ONLY the gen witness -> veto names it, the certified probe passes
+    eng = _PerPromptEngine(break_marker="MG")
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=1, cap_gen_pool=1)
+    assert res["veto"] and res["broke_cap"] == ["gsrc:g"], res
+    assert res["checked_cap_ids"] == ["A:c0", "gsrc:g"]
+    # cap_gen_pool=0 -> pre-v8 result shape: no checked_cap_ids key
+    eng = _PerPromptEngine(break_marker=None)
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=1)
+    assert "checked_cap_ids" not in res, \
+        "pre-v8 gate records must keep their exact shape"
+
+
+def test_rrv_gen_probe_rate_under_theta():
+    """Gen witnesses are rate-checked exactly like certified probes at
+    theta>0: their ':g' id carries a cap_rates entry (the v8 H1 mechanism)."""
+    v, ver = SelfCertVault(), Verifier(sandbox=PythonSandbox())
+    assert v.commit_cap_probe("gsrc:g", "famA", "spec g", "PROMPT MG\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=1)
+    eng = _RateEngine([_GOOD_CODE, _BAD_CODE, _BAD_CODE])
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=1, cap_gen_pool=1,
+                            cap_retain_min=1.0, cap_samples=3)
+    assert res["veto"], "a 1/3 pass rate must fail the strict threshold"
+    assert res["cap_rates"]["gsrc:g"]["passes"] == 1
+    assert res["cap_rates"]["gsrc:g"]["n"] == 3
+
+
+def test_rrv_gen_math_probe_checked():
+    """A math ':g' witness is checked via the canonical-number path and can
+    veto alone (the math_word family's gen lane)."""
+    ver = Verifier(sandbox=PythonSandbox())
+    v = SelfCertVault()
+    math_prompt = ("Solve and give ONLY the final numeric answer.\n"
+                   "What is 6 times 7?\nAnswer: ")
+    assert v.commit_cap_probe("msrc:g", "arith", "untrained math spec",
+                              math_prompt, "42", [], 0.86,
+                              domain="math", pool=1, gen_pool=1)
+    eng = StubEngine()
+    eng.math_answers = ["42", "42"]
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=1, cap_gen_pool=1)
+    assert not res["veto"] and res["checked_cap_ids"] == ["msrc:g"], res
+    eng = StubEngine()
+    eng.math_answers = ["41", "41"]
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1, cap_pool=1, cap_gen_pool=1)
+    assert res["veto"] and res["broke_cap"] == ["msrc:g"], res
+
+
+def test_v8_default_config_is_inert():
+    """All G1 switches default OFF so pre-v8 rows stay bit-identical."""
+    import inspect
+    from gcl.vault import SelfCertVault
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    assert cfg.sccl_genprobe_learners == []
+    assert cfg.sccl_genprobes == 0
+    sig = inspect.signature(SelfCertVault.selfreplay_veto)
+    assert sig.parameters["cap_gen_pool"].default == 0
+    psig = inspect.signature(SelfCertVault._cap_pool_by_family)
+    assert psig.parameters["gen_pool"].default == 0
+    csig = inspect.signature(SelfCertVault.commit_cap_probe)
+    assert csig.parameters["gen_pool"].default == 0
+
+
+def test_v8_learners_registered():
+    from gcl.learners.learners import (LEARNERS, SCCLLearner,
+                                       SCCLGenProbeLearner,
+                                       SCCLGenProbeStrictLearner,
+                                       SCCLGenProbeStrictAnchorLearner)
+    assert LEARNERS["sccl_genprobe"] is SCCLGenProbeLearner
+    assert LEARNERS["sccl_genprobe_strict"] is SCCLGenProbeStrictLearner
+    assert LEARNERS["sccl_genprobe_strict_anchor"] is SCCLGenProbeStrictAnchorLearner
+    for cls in (SCCLGenProbeLearner, SCCLGenProbeStrictLearner,
+                SCCLGenProbeStrictAnchorLearner):
+        assert issubclass(cls, SCCLLearner)
+
+
+def test_v8_env_wiring_logs_gen_lane_and_checked_ids():
+    """Env-level wiring: a gen row's gate record persists cap_gen_pool and
+    the exact checked_cap_ids (the C2/C3 audit hooks); a non-gen row's gate
+    record carries NEITHER field (pre-v8 shape)."""
+    from gcl.curriculum import Family
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg._learner_name = "sccl_genprobe"
+    cfg.sccl_learners = ["sccl_genprobe"]
+    cfg.sccl_nogate_learners = []
+    cfg.sccl_gate_probe = 0
+    cfg.sccl_capprobe_learners = ["sccl_genprobe"]
+    cfg.sccl_capprobe_check = 1
+    cfg.sccl_genprobe_learners = ["sccl_genprobe"]
+    cfg.sccl_genprobes = 1
+    eng = FakeEngine(cfg, regen_passes=True)
+    ver = Verifier(sandbox=PythonSandbox())
+    vault = SelfCertVault()
+    t1 = _poisoned_task()
+    t2 = Task(task_id="t_v8_ok", family="fam", domain="code",
+              prompt="Return the sum of two integers a and b.",
+              test_code="assert add2(2, 2) == 4",
+              reference_answer="def add2(a, b):\n    return 4",
+              entry_point="add2")
+    env = GroundedContinualEnv(cfg, eng, ver,
+                               [Family(name="fam", tasks=[t1, t2], holdout=[])],
+                               holdout=[], vault=vault, sccl=True)
+    vault.commit_cap_probe("seed:c0", "fam", "variant spec",
+                           "PROMPT v\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9)
+    vault.commit_cap_probe("src:g", "fam", "untrained spec",
+                           "PROMPT g\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9, pool=1, gen_pool=1)
+    _, _, _, s1 = env.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                  metadata={"sccl": _cert_meta(found=True)}))
+    g1 = s1["update_info"]["gate"]
+    assert g1.get("cap_gen_pool") == 1, g1
+    assert g1.get("checked_cap_ids") == ["seed:c0", "src:g"], g1
+    # non-gen row: same vault contents, no G1 fields on the gate record
+    cfg2 = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg2._learner_name = "sccl_strict"
+    cfg2.sccl_learners = ["sccl_strict"]
+    cfg2.sccl_nogate_learners = []
+    cfg2.sccl_gate_probe = 0
+    cfg2.sccl_capprobe_learners = ["sccl_strict"]
+    cfg2.sccl_capprobe_check = 1
+    eng2 = FakeEngine(cfg2, regen_passes=True)
+    env2 = GroundedContinualEnv(cfg2, eng2, ver,
+                                [Family(name="fam", tasks=[t1, t2], holdout=[])],
+                                holdout=[], vault=SelfCertVault(), sccl=True)
+    env2.vault.commit_cap_probe("seed:c0", "fam", "variant spec",
+                                "PROMPT v\n```python\n", _CAP_CODE,
+                                _CAP_TESTS_VARIANT, 0.9)
+    env2.vault.commit_cap_probe("src:g", "fam", "untrained spec",
+                                "PROMPT g\n```python\n", _CAP_CODE,
+                                _CAP_TESTS_VARIANT, 0.9, pool=1, gen_pool=1)
+    _, _, _, s2 = env2.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                   metadata={"sccl": _cert_meta(found=True)}))
+    g2 = s2["update_info"]["gate"]
+    assert "cap_gen_pool" not in g2 and "checked_cap_ids" not in g2, \
+        "non-gen gate records must keep the pre-v8 shape"

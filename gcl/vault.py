@@ -417,7 +417,14 @@ class SelfCertVault(SkillVault):
         """Source skill of a cap probe ('<skill>:c<i>' -> '<skill>')."""
         return task_id.rsplit(":c", 1)[0]
 
-    def _cap_pool_by_family(self, pool: int) -> Dict[str, List[Any]]:
+    @staticmethod
+    def _is_gen_probe(task_id: str) -> bool:
+        """SCCL v8 (Branch F): generalization witnesses carry a ':g' suffix
+        (manufactured from UNTRAINED stream tasks, not certified skills)."""
+        return task_id.endswith(":g")
+
+    def _cap_pool_by_family(self, pool: int,
+                            gen_pool: int = 0) -> Dict[str, List[Any]]:
         """SCCL v6 (Branch D): cap_probe pool per family, ensemble-capable.
 
         Within each family keep only the FRESHEST variant of each distinct
@@ -425,30 +432,63 @@ class SelfCertVault(SkillVault):
         freshest variant is newest by commit order (listed in commit order).
         pool=1 reduces exactly to the v5b rule (newest cap_probe per family),
         so v5b rows stay bit-identical. Deterministic: no RNG.
+
+        SCCL v8 (Branch F, G1): with gen_pool>0 the pool splits into two
+        lanes. Certified ':c' probes keep the exact `pool` rule above;
+        generalization ':g' probes (source = an UNTRAINED stream task) occupy
+        DEDICATED slots — the newest gen_pool per family, never evicted by
+        certified probes — because v7 telemetry (F5) showed certified-skill
+        probes are blind to generalization erosion. gen_pool=0 executes the
+        exact legacy path (bit-identical). Within a family the certified lane
+        is listed first, then the gen lane; order inside the lane is commit
+        order. Deterministic: no RNG.
         """
-        obj: Dict[str, Dict[str, Any]] = {}
-        last_idx: Dict[str, Dict[str, int]] = {}
+        if int(gen_pool) <= 0:
+            obj: Dict[str, Dict[str, Any]] = {}
+            last_idx: Dict[str, Dict[str, int]] = {}
+            for i, s in enumerate(self._skills):
+                if getattr(s, "kind", "") != "cap_probe":
+                    continue
+                src = self._cap_probe_source(s.task_id)
+                obj.setdefault(s.family, {})[src] = s
+                last_idx.setdefault(s.family, {})[src] = i
+            out: Dict[str, List[Any]] = {}
+            for fam, by_src in obj.items():
+                srcs = sorted(by_src, key=lambda x: last_idx[fam][x])
+                out[fam] = [by_src[x] for x in srcs[-max(1, int(pool)):]]
+            return out
+        cert: Dict[str, Dict[str, Any]] = {}
+        cert_idx: Dict[str, Dict[str, int]] = {}
+        gen: Dict[str, List[Any]] = {}
         for i, s in enumerate(self._skills):
             if getattr(s, "kind", "") != "cap_probe":
                 continue
-            src = self._cap_probe_source(s.task_id)
-            obj.setdefault(s.family, {})[src] = s
-            last_idx.setdefault(s.family, {})[src] = i
-        out: Dict[str, List[Any]] = {}
-        for fam, by_src in obj.items():
-            srcs = sorted(by_src, key=lambda x: last_idx[fam][x])
-            out[fam] = [by_src[x] for x in srcs[-max(1, int(pool)):]]
-        return out
+            if self._is_gen_probe(s.task_id):
+                gen.setdefault(s.family, []).append(s)
+            else:
+                src = self._cap_probe_source(s.task_id)
+                cert.setdefault(s.family, {})[src] = s
+                cert_idx.setdefault(s.family, {})[src] = i
+        out2: Dict[str, List[Any]] = {}
+        for fam in sorted(set(list(cert) + list(gen))):
+            probes: List[Any] = []
+            by_src = cert.get(fam, {})
+            srcs = sorted(by_src, key=lambda x: cert_idx[fam][x])
+            probes.extend(by_src[x] for x in srcs[-max(1, int(pool)):])
+            probes.extend(gen.get(fam, [])[-max(0, int(gen_pool)):])
+            out2[fam] = probes
+        return out2
 
-    def _cap_pool_keep_ids(self, pool: int) -> set:
-        """Ids of the cap_probes to KEEP under an ensemble pool of size `pool`."""
-        return {id(s) for probes in self._cap_pool_by_family(pool).values()
+    def _cap_pool_keep_ids(self, pool: int, gen_pool: int = 0) -> set:
+        """Ids of the cap_probes to KEEP under an ensemble pool of size `pool`
+        (plus, SCCL v8, a dedicated gen-witness lane of size `gen_pool`)."""
+        return {id(s) for probes in self._cap_pool_by_family(pool, gen_pool).values()
                 for s in probes}
 
     def commit_cap_probe(self, task_id: str, family: str, spec: str, prompt: str,
                           code: str, self_tests: List[str], conf: float,
                           domain: str = "code", entry: str = "",
-                          pool: int = 1) -> bool:
+                          pool: int = 1, gen_pool: int = 0) -> bool:
         """Admit a certified CAPABILITY probe (kind="cap_probe", SCCL v5b).
 
         A cap_probe is a certified variant of a family's capability that the
@@ -461,7 +501,10 @@ class SelfCertVault(SkillVault):
         source-skill probes per family (freshest variant per skill), because
         v5b telemetry showed a single newest-per-family probe witnesses only
         ONE skill axis of a heterogeneous family and passed every update that
-        destroyed an unwitnessed axis.
+        destroyed an unwitnessed axis. SCCL v8 (Branch F, G1): gen_pool>0
+        additionally reserves dedicated slots for generalization witnesses
+        (task_id suffix ':g', manufactured from UNTRAINED stream tasks) that
+        certified probes never evict.
         """
         ok = self.commit_certified(task_id=task_id, family=family, spec=spec,
                                    prompt=prompt, code=code, self_tests=self_tests,
@@ -469,7 +512,7 @@ class SelfCertVault(SkillVault):
                                    dedup_sim=0.0, kind="cap_probe")
         if not ok:
             return False
-        keep = self._cap_pool_keep_ids(pool)
+        keep = self._cap_pool_keep_ids(pool, gen_pool)
         drop = [s for s in self._skills
                 if getattr(s, "kind", "") == "cap_probe" and id(s) not in keep]
         if drop:
@@ -477,6 +520,24 @@ class SelfCertVault(SkillVault):
             self._skills = [s for s in self._skills if id(s) not in drop_ids]
             self._embs = [s.emb for s in self._skills]
             self._save()
+        return True
+
+    def retire_cap_probe(self, task_id: str) -> bool:
+        """SCCL v8 (Branch F): retire a generalization witness whose source
+        task has entered training. A ':g' probe witnesses the model's ability
+        to solve an UNTRAINED task; once that task itself becomes a training
+        target the probe would degrade to a reproduction witness and
+        contaminate the coverage claim, so it is removed before any gate
+        during the source task's own episodes. Returns True if a probe was
+        removed. Deterministic."""
+        before = len(self._skills)
+        self._skills = [s for s in self._skills
+                        if not (getattr(s, "kind", "") == "cap_probe"
+                                and s.task_id == task_id)]
+        if len(self._skills) == before:
+            return False
+        self._embs = [s.emb for s in self._skills]
+        self._save()
         return True
 
     def promote_probes(self, min_checks: int = 1) -> int:
@@ -571,7 +632,7 @@ class SelfCertVault(SkillVault):
                         check_math: int = 0, stratified: bool = False,
                         check_cap_probes: int = 0, cap_margin: int = 0,
                         cap_pool: int = 1, cap_retain_min: float = 0.0,
-                        cap_samples: int = 0) -> Dict[str, Any]:
+                        cap_samples: int = 0, cap_gen_pool: int = 0) -> Dict[str, Any]:
         """Self-Replay Veto (RRV) — the gold-free forgetting detector.
 
         For each recently committed self-certified skill, REGENERATE solutions
@@ -613,6 +674,14 @@ class SelfCertVault(SkillVault):
             draws are POOLED into the rate. cap_retain_min <= 0 executes the
             exact legacy any-pass path (bit-identical). Per-probe rates are
             returned in "cap_rates" for engagement telemetry.
+          * cap_gen_pool>0 — SCCL v8 (Branch F, G1): the cap-probe pool gains
+            a dedicated lane of up to cap_gen_pool GENERALIZATION witnesses
+            per family (task_id suffix ':g', manufactured from UNTRAINED
+            stream tasks and retired when their source task trains). They are
+            re-checked by this same stratum; v7 telemetry (F5) showed
+            certified-skill probes pass at rate 1.0 through every erosion
+            because they test reproduction, not generalization. cap_gen_pool=0
+            (default) keeps the exact v5b/v6/v7 pool.
 
         Note we deliberately do NOT fall back to executing the stored code: that
         artifact trivially passes its own tests regardless of the model's state,
@@ -711,14 +780,17 @@ class SelfCertVault(SkillVault):
         checked_cap = 0
         broke_cap: List[str] = []
         cap_rates: Dict[str, Dict[str, int]] = {}
+        checked_cap_ids: List[str] = []
         cap_n = max(1, int(cap_samples or n_samples))
         if check_cap_probes > 0:
-            caps = self._cap_pool_by_family(max(1, int(cap_pool)))
+            caps = self._cap_pool_by_family(max(1, int(cap_pool)),
+                                            max(0, int(cap_gen_pool)))
             for fam in sorted(caps):
               for s in caps[fam]:
                 if getattr(s, "domain", "code") == "math":
                     want = format_number(str(s.code))
                     checked_cap += 1
+                    checked_cap_ids.append(s.task_id)
                     if cap_retain_min > 0:
                         def _math_hits(samples: List[str]) -> int:
                             hits = 0
@@ -780,6 +852,7 @@ class SelfCertVault(SkillVault):
                     skipped.append(s.task_id)
                     continue
                 checked_cap += 1
+                checked_cap_ids.append(s.task_id)
                 if cap_retain_min > 0:
                     hits = self._pass_hits(_regen_codes(s.prompt, cap_n),
                                            tests, verifier)
@@ -814,4 +887,11 @@ class SelfCertVault(SkillVault):
             # E1 engagement telemetry: per-probe pass rate (post-margin).
             # Only present on theta>0 calls so legacy gate records keep shape.
             result["cap_rates"] = cap_rates
+        if cap_gen_pool > 0:
+            # G1 engagement telemetry (v8): which cap probes this gate
+            # checked, in check order — lets the fail-closed checker verify
+            # ':g' witnesses were live and retired before their source task
+            # trained. Only present on gen rows so all pre-v8 gate records
+            # keep their exact shape.
+            result["checked_cap_ids"] = checked_cap_ids
         return result
