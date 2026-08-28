@@ -746,3 +746,40 @@ weights themselves, hence the only candidate to protect unwitnessed axes;
 if H2/H3 also fail, Branch E must convert the gate's discrete pass/fail
 evidence into a continuous constraint (margin-tracked probes and/or
 probe-loss-projected gradients) rather than adding more point witnesses.
+
+ANCHOR ROW RESULT (sccl_cap_anchor, seed 47, K=1 + anchor λ=0.1): H2 PASSES
+marginally. acc 0.6250, frontier 0.5500, arith holdout 0.400 > 0.375
+(+0.025), forgetting 0.075 (BEST among capability cells, matching plain
+sccl), math 0.500 (DOWN from 1.000 — the anchor suppresses beneficial
+plasticity too), string 0.800, drift 0.800, 12 upd / 5 rb. C3 engaged:
+anchor_pen > 0 on ALL 12 accepted updates (range 0.57–1.48), λ=0.1.
+Gold timeline (measurement only): erosion events still happen (0.6->0.4 at
+idx1/idx18/idx28) but are SHALLOWER and partially recovered — the exact
+update that killed arith in the ensemble row (string-phase mbpp_62) left
+arith at 0.6 under the anchor. The anchor acts as intended: it bounds
+per-update drift rather than preventing it, so arith oscillates 0.4-0.6
+instead of ratcheting down to 0.2. Net: the regularizer, not the witness,
+is the mechanism protecting unwitnessed axes — exactly the prediction.
+Cost: math plasticity halved (1.000 -> 0.500). The composition row tests
+whether ensemble true-positive vetoes + anchor drift-bounding compose.
+
+POST-v6 BRANCH E DECISION RULE (pre-registered BEFORE the composition-row
+result, so the next-branch choice is not fit to the final number):
+  R1 BREAKTHROUGH: PASS (composition arith >= 0.55 AND frontier >= 0.48)
+     -> multi-seed 43/44 confirmation, then paper finalization. Arc complete.
+  R2 composition arith in [0.45, 0.55): the composition improves on anchor
+     alone but falls short -> Branch E = make the anchor SELECTIVE:
+     E3 competence-snapshot anchor (anchor point = LoRA state at each
+     family's certification moment, not θ0), attacking the anchor's
+     plasticity tax (math 1.000 -> 0.500) while keeping drift-bounding.
+  R3 composition arith < 0.45 (no synergy; anchor dominates or ensemble
+     hurts): Branch E = probe SENSITIVITY track, cheap-first:
+     E1 pass-rate margin veto — replace "any-of-n passes = retained" with
+        pass-rate >= threshold (e.g. 2/3 of n samples per probe); subthreshold
+        damage degrades pass rate before it breaks the probe. 1-parameter,
+        gold-free, attacks M1' directly.
+     If E1 fails or guard-arming spirals -> E2 gold-free probe-gradient
+        projection (A-GEM with the certified probe pool as the constraint
+        set): project each update's gradient off probe-loss-increasing
+        directions. Continuous in-update constraint; novel constraint set.
+  R4 any fail-closed C1-C5 failure -> abort interpretation, fix, rerun.
