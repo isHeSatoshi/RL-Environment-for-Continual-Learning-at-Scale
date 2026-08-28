@@ -763,6 +763,42 @@ is the mechanism protecting unwitnessed axes — exactly the prediction.
 Cost: math plasticity halved (1.000 -> 0.500). The composition row tests
 whether ensemble true-positive vetoes + anchor drift-bounding compose.
 
+V6 FINAL VERDICT (2026-08-28, runs/sccl_v6, verdict_check.md, rc=0):
+  H1 FAIL | H2 PASS | H3 FAIL | BREAKTHROUGH: FAIL | C1-C5 ALL PASS.
+  frozen 0.613/0.588 | sccl 0.575/0.500 | capprobe 0.625/0.494 arith .375
+  | strat 0.694/0.562 arith .375 | capens 0.650/0.525 arith .200 |
+  cap_anchor 0.625/0.550 arith .400 | capens_anchor 0.625/0.550 arith .400.
+  H3 fails on ACC: composition ties cap_anchor exactly (0.400 >= max(.2,.4)
+  holds with equality, but 0.625 < strat's 0.694).
+FINDINGS (from per-update gold telemetry, telemetry_v6.json):
+  F1 Insensitivity is 100% in EVERY cap row: all probe-checked erosions
+     passed their probes, at K=1 AND K=3. Witness count does not buy
+     sensitivity. (M1' confirmed as the binding constraint.)
+  F2 The ensemble DID add cross-family true-positive vetoes (3 in capens,
+     all via the tuple-average probe) but the terminal damage path bypassed
+     all three arith axes incl. the numeric one.
+  F3 The composition row is metrically IDENTICAL to the anchor row on every
+     holdout (0.400/0.500/0.800/0.800, frontier 0.550) with MORE rollbacks
+     (8 vs 5). Under drift-bounded updates the ensemble's extra vetoes
+     remove updates that were already bounded-harmless: the mechanisms do
+     NOT synergize; the anchor absorbs the ensemble's contribution.
+  F4 Under the anchor, arith gold is a BOUNDED RANDOM WALK on {0.4, 0.6}:
+     every erosion step is exactly -0.2 and every recovery +0.2; recoveries
+     occur only when arith/math-family training happens; terminal damage
+     persists only because it is inflicted in the last phases after arith
+     training has ended. The anchor raised the floor (0.2 -> 0.4) but the
+     endpoint is decided by the last 1-2 damaging updates, not cumulative
+     erosion. In-phase first-update erosion (0.6->0.4) occurred in 3 of 4
+     cap rows (seeds 46/47/48), so seed-45's net-preservation was the
+     exception.
+DECISION: pre-registered rule R3 fires (composition arith 0.400 < 0.45):
+  Branch E = probe-sensitivity track, cheap-first: E1 pass-rate margin veto
+  (replace any-of-n with pass-rate >= threshold); fallback E2 gold-free
+  probe-gradient projection. Additional design input from F4: any E1
+  configuration should be evaluated against the bounded-walk dynamic — the
+  endpoint problem is now "prevent the LAST damaging updates of the stream",
+  which a more sensitive veto can do only if it fires on subthreshold drift.
+
 POST-v6 BRANCH E DECISION RULE (pre-registered BEFORE the composition-row
 result, so the next-branch choice is not fit to the final number):
   R1 BREAKTHROUGH: PASS (composition arith >= 0.55 AND frontier >= 0.48)
