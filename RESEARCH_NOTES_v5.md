@@ -694,3 +694,27 @@ index. scripts/v6_launcher.sh gated smoke->audit->ladder; scripts/
 v6_check_watcher.sh will run scripts/v6_check.py (C1-C5 + H1/H2/H3/BREAKTHROUGH)
 when runs/sccl_v6/metrics.json finalizes. Gold-free throughout; gold only final
 eval + post-hoc telemetry.
+
+INTERIM (ladder in flight, 2026-08-28 ~06:00-09:00): first three determinism
+rows reproduced runs/sccl_v5b BIT-FOR-BIT (frozen acc 0.6125 / frontier 0.5875;
+sccl acc 0.575 / frontier 0.5; sccl_capprobe acc 0.625 / frontier 0.4938 /
+9 updates / 10 rollbacks; every report key + per-family holdout identical).
+This confirms the
+pool=1 code path is a true no-op generalization on real 3B hardware, so any
+treatment-row difference is attributable to the ensemble/anchor alone.
+Live mechanism signal from sccl_capprobe (K=1 control; trajectory steps):
+the cap stratum fired 4 cross/within-family vetoes over the stream —
+  * step 0 (arith phase): update on mbpp_244 broke its own fresh probe
+    mbpp_244:c0 (checked_cap=1);
+  * step 18 (STRING phase): update on string task mbpp_259 broke the
+    math_word probe math_42_2:c0 AND the string probe mbpp_259:c0
+    (checked_cap=3) — cross-family erosion caught mid-stream;
+  * steps 30-31 (DRIFT phase): two drift updates broke the arith probe
+    mbpp_388:c0 (checked_cap=4) — exactly the terminal cross-family damage
+    pattern the v5b telemetry identified, here VETOED by the cap stratum.
+So even K=1 provides real cross-family protection when the newest probe
+happens to sit on the damaged axis. But arith still ended at ~0.35: the
+math_word-phase updates that eroded arith (gold telemetry cand 0.350/0.375)
+passed the 1-2 probes checked at the time — the unwitnessed-axis failure.
+The K=3 ensemble rows test whether more distinct-source probes per family
+close that residual gap.
