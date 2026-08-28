@@ -885,7 +885,7 @@ HYPOTHESES (v7 — pre-registered BEFORE the run)
   H1 (sensitivity): at least one strict dose lifts arith above the
      K=1 any-pass baseline: sccl_strict.arith > 0.375 OR
      sccl_majority.arith > 0.375. (Baseline 0.375 = v5b/v6 strat rows,
-     reproduced in-ladder by row idx2.)
+     reproduced in-ladder by row idx3.)
   H1b (dose ordering, directional): cap-veto counts must be monotone in
      strictness: strict >= majority >= baseline. If strict has FEWER
      cap-vetoes than baseline, the threshold never engaged its extra
@@ -894,20 +894,27 @@ HYPOTHESES (v7 — pre-registered BEFORE the run)
      (ensemble width adds to sensitivity, contra v6 where width alone
      did not).
   H3 (composition): sccl_ens_strict_anchor.arith >= max(arith of rows
-     3..5) AND its ACC >= max(ACC of rows 3..5).
+     4..6) AND its ACC >= max(ACC of rows 4..6).
   BREAKTHROUGH: sccl_ens_strict_anchor arith >= 0.55 AND
      frontier >= sccl frontier (0.5) - 0.02 -> multi-seed (43/44)
      confirmation BEFORE any headline claim.
 
-LADDER (configs/sccl_v7.json -> runs/sccl_v7, seeds 42..48 by index)
-  idx0 frozen              seed 42  determinism (must bit-match v6)
-  idx1 sccl                seed 43  determinism (must bit-match v6)
-  idx2 sccl_capprobe_strat seed 44  K=1, theta=0 (any-pass; must
-                                    bit-match v6 strat — control row)
-  idx3 sccl_strict         seed 45  K=1, theta=1.0, n=3 (E1 high dose)
-  idx4 sccl_majority       seed 46  K=1, theta=2/3, n=3 (E1 low dose)
-  idx5 sccl_ens_strict     seed 47  K=3, theta=1.0, n=3 (width+sensitivity)
-  idx6 sccl_ens_strict_anchor seed 48  K=3, theta=1.0, n=3, anchor
+LADDER (configs/sccl_v7.json -> runs/sccl_v7, seed = torch_seed 42 + index)
+  CORRECTION (pre-run, before any v7 process launched): the first draft of
+  this ladder placed sccl_capprobe_strat at idx2/seed 44, but the v6 ladder
+  ran that row at idx3/seed 45 (v6 idx2 was sccl_capprobe). Bit-identity
+  requires the identical seed, so the v6 prefix is preserved exactly and the
+  E1 rows shift to idx4..idx7.
+  idx0 frozen              seed 42  determinism (must bit-match v6 idx0)
+  idx1 sccl                seed 43  determinism (must bit-match v6 idx1)
+  idx2 sccl_capprobe       seed 44  K=1, theta=0, unstratified (must
+                                    bit-match v6 idx2 — determinism row)
+  idx3 sccl_capprobe_strat seed 45  K=1, theta=0, stratified (must
+                                    bit-match v6 idx3 — H1 baseline row)
+  idx4 sccl_strict         seed 46  K=1, theta=1.0, n=3 (E1 high dose)
+  idx5 sccl_majority       seed 47  K=1, theta=2/3, n=3 (E1 low dose)
+  idx6 sccl_ens_strict     seed 48  K=3, theta=1.0, n=3 (width+sensitivity)
+  idx7 sccl_ens_strict_anchor seed 49  K=3, theta=1.0, n=3, anchor
                                     lambda=0.1 (full composition cell)
   All rows share the v5b/v6 stream (hash 554ce43f182b, seed 42) and
   sccl_replay_check=3 / sccl_replay_samples=2 for the skill stratum.
@@ -921,9 +928,9 @@ DEGENERACY GUARD (pre-registered)
   cell (idx6) is degenerate, BREAKTHROUGH = FAIL with a mechanism note.
 
 FAIL-CLOSED CHECKS (scripts/v7_check.py, auto-run by the watcher)
-  C1 determinism: rows idx0/idx1 bit-match runs/sccl_v6 rows on every
-     report metric; idx2 bit-matches v6 sccl_capprobe_strat. Any mismatch
-     -> abort interpretation (engine/config regression).
+  C1 determinism: rows idx0..idx3 bit-match runs/sccl_v6 rows idx0..idx3
+     on every report metric (frozen/sccl/sccl_capprobe/sccl_capprobe_strat).
+     Any mismatch -> abort interpretation (engine/config regression).
   C2 engagement: every theta>0 row logs cap_rates on EVERY gate with
      checked_cap>0; at least 50% of those gates show cap_rates for >= 1
      probe. Missing cap_rates on a theta>0 gate -> abort (telemetry hole).
@@ -944,7 +951,8 @@ EXPECTED-RANGE SANITY (pre-run calibration, not pass/fail)
   Inversion of this ordering is itself a finding (record, don't abort).
 
 COST/SEQUENCING
-  7 rows x ~32 episodes; v6 wall-clock was ~7h for 7 rows on the 4060 Ti.
+  8 rows x ~32 episodes; v6 wall-clock was ~7h for 7 rows on the 4060 Ti,
+  so ~8h expected.
   Smoke first: configs/_smoke_v7.json (2 episodes, theta rows only) must
   show cap_rates present + bit-identical theta=0 trajectory vs v5b smoke.
   Then full ladder, watcher runs v7_check.py on finalization.
