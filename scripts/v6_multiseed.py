@@ -25,6 +25,8 @@ Launch convention (Windows): TMPDIR/TEMP/TMP -> /d/gcl_tmp.
 """
 from __future__ import annotations
 
+import json
+import math
 import os
 import shutil
 import subprocess
@@ -34,6 +36,80 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG = os.path.join(REPO, "configs", "sccl_v6.json")
 S42_SRC = os.path.join(REPO, "runs", "sccl_v6")
 S42_DST = os.path.join(REPO, "runs", "sccl_v6_s42")
+FAMILIES = ["arith", "math_word", "string", "drift"]
+ROWS = ["sccl", "sccl_capprobe_strat", "sccl_capens",
+        "sccl_cap_anchor", "sccl_capens_anchor"]
+
+
+def fam_scores(learner: dict) -> dict:
+    fh = learner.get("eval_detail", {}).get("final_heldout", {})
+    out = {}
+    for fam in FAMILIES:
+        tasks = fh.get(fam, [])
+        out[fam] = sum(t["score"] for t in tasks) / max(1, len(tasks))
+    return out
+
+
+def arith_table(seeds: list[int]) -> None:
+    """Per-seed arith holdout (the pre-registered breakthrough axis)."""
+    base = json.load(open(CONFIG)).get("out_dir", "runs/sccl_v6")
+    per: dict[str, dict[int, float]] = {}
+    front: dict[str, dict[int, float]] = {}
+    for seed in seeds:
+        mp = os.path.join(REPO, f"{base}_s{seed}", "metrics.json")
+        if not os.path.exists(mp):
+            continue
+        learners = json.load(open(mp))["learners"]
+        for name in ROWS:
+            if name not in learners:
+                continue
+            per.setdefault(name, {})[seed] = fam_scores(learners[name])["arith"]
+            front.setdefault(name, {})[seed] = learners[name].get("frontier_score", 0.0)
+
+    def ms(xs: list[float]):
+        mu = sum(xs) / len(xs)
+        var = sum((x - mu) ** 2 for x in xs) / (len(xs) - 1) if len(xs) > 1 else 0.0
+        return mu, math.sqrt(var)
+
+    print("\n=== Per-seed ARITH holdout (breakthrough axis) ===")
+    hdr = f"{'learner':22s}" + "".join(f"  s{s}" for s in seeds) + "   mean+/-std"
+    print(hdr)
+    for name in ROWS:
+        if name not in per:
+            continue
+        vals = [per[name].get(s) for s in seeds]
+        got = [v for v in vals if v is not None]
+        mu, sd = ms(got) if len(got) > 1 else (got[0] if got else float("nan"), 0.0)
+        cells = "".join(f"  {per[name][s]:.3f}" if s in per[name] else "    -  "
+                        for s in seeds)
+        print(f"{name:22s}{cells}   {mu:.3f}+/-{sd:.3f}")
+    print("\n=== Per-seed frontier ===")
+    print(hdr)
+    for name in ROWS:
+        if name not in front:
+            continue
+        vals = [front[name].get(s) for s in seeds]
+        got = [v for v in vals if v is not None]
+        mu, sd = ms(got) if len(got) > 1 else (got[0] if got else float("nan"), 0.0)
+        cells = "".join(f"  {front[name][s]:+.3f}" if s in front[name] else "    -  "
+                        for s in seeds)
+        print(f"{name:22s}{cells}   {mu:+.3f}+/-{sd:.3f}")
+    ea = [per["sccl_capens_anchor"][s] for s in seeds if s in per.get("sccl_capens_anchor", {})]
+    sc = [front["sccl"][s] for s in seeds if s in front.get("sccl", {})]
+    eaf = [front["sccl_capens_anchor"][s] for s in seeds
+           if s in front.get("sccl_capens_anchor", {})]
+    if ea and sc and eaf:
+        # paired per-seed breakthrough check
+        ok = 0
+        for s in seeds:
+            if s in per.get("sccl_capens_anchor", {}) and s in front.get("sccl", {}) \
+                    and s in front.get("sccl_capens_anchor", {}):
+                if per["sccl_capens_anchor"][s] >= 0.55 and \
+                        front["sccl_capens_anchor"][s] >= front["sccl"][s] - 0.02:
+                    ok += 1
+        print(f"\nBREAKTHROUGH rule met on {ok}/{len(seeds)} seeds "
+              f"(arith>=0.55 AND frontier>=sccl-0.02, paired per seed)")
+
 
 
 def main() -> None:
@@ -58,7 +134,9 @@ def main() -> None:
     r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "run_seeds.py"),
                         "--config", CONFIG, "--seeds", "42,43,44", "--aggregate-only"],
                        cwd=REPO)
-    sys.exit(r.returncode)
+    if r.returncode != 0:
+        sys.exit(r.returncode)
+    arith_table([42, 43, 44])
 
 
 if __name__ == "__main__":
