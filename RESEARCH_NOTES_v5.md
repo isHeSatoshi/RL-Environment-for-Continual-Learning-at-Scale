@@ -963,3 +963,251 @@ FALLBACK (pre-registered)
   probe pool as constraint set), per rule R3. E1 partially succeeds
   (H1 PASS, H2/H3 FAIL) -> Branch F decision written after the verdict,
   pre-registered before the next run.
+
+---
+
+## BRANCH E (E1) — VERDICT (seed 42, 2026-08-28, runs/sccl_v7)
+
+Run facts: 8-row ladder, wall-clock ~6.5h (12:06 -> 18:35) on the 4060 Ti.
+All fail-closed checks PASSED (scripts/v7_check.py, runs/sccl_v7/verdict_check.md):
+C1 determinism — the four prefix rows (frozen, sccl, sccl_capprobe,
+sccl_capprobe_strat) bit-match runs/sccl_v6 on every report metric, frontier,
+and family holdout score (verified incrementally during the run as well).
+C2 engagement — every theta>0 gate with checked_cap>0 logged non-empty
+cap_rates. C3 dose sanity — logged cap_retain_min == configured theta,
+cap_n==3, denominators in {3,5}. C4 isolation — frozen/sccl show zero cap
+activity; the theta=0 row logged legacy gate shape only. C4b anchor
+engagement. C5 gold-free audit clean.
+
+VERDICT: H1 FAIL | H1b FAIL | H2 PASS | H3 PASS (trivial) | BREAKTHROUGH FAIL.
+
+| learner                  | ACC   | BWT    | Forget | Frontier | Upd | arith | math  | string | drift |
+|--------------------------|-------|--------|--------|----------|-----|-------|-------|--------|-------|
+| frozen                   | 0.613 | +0.132 | 0.025  | +0.588   |   0 | 0.600 | 0.250 | 0.800  | 0.800 |
+| sccl                     | 0.575 | +0.095 | 0.075  | +0.500   |  17 | 0.400 | 0.500 | 0.800  | 0.600 |
+| sccl_capprobe            | 0.625 | +0.145 | 0.131  | +0.494   |   9 | 0.375 | 0.750 | 0.600  | 0.775 |
+| sccl_capprobe_strat      | 0.694 | +0.214 | 0.131  | +0.562   |  15 | 0.375 | 1.000 | 0.600  | 0.800 |
+| sccl_strict (K=1 θ=1.0)  | 0.700 | +0.220 | 0.125  | +0.575   |  14 | 0.200 | 1.000 | 0.800  | 0.800 |
+| sccl_majority (K=1 θ=⅔)  | 0.700 | +0.220 | 0.125  | +0.575   |   9 | 0.200 | 1.000 | 0.800  | 0.800 |
+| sccl_ens_strict (K=3 θ=1.0) | 0.637 | +0.157 | 0.075 | +0.562  |  12 | 0.400 | 0.750 | 0.800  | 0.600 |
+| sccl_ens_strict_anchor * | 0.738 | +0.257 | 0.025  | +0.713   |   1 | 0.600 | 0.750 | 0.800  | 0.800 |
+
+\* degenerate per the pre-registered guard: 1 accepted update (<3) = veto
+stall; excluded from the H2/H3 maxima; degenerate breakthrough cell forces
+BREAKTHROUGH=FAIL even though its numbers clear the threshold (arith 0.600
+>= 0.55, frontier +0.713 >= +0.48). The row "passed" by not learning.
+
+Post-hoc gold telemetry (scripts/v7_telemetry.py, telemetry_v7.json) —
+E1 RATE SENSITIVITY, the central mechanistic question:
+
+| learner        | erosion rate | binary insens. | erosions w/ gate rate<1.0 | final arith |
+|----------------|-------------:|---------------:|--------------------------:|------------:|
+| sccl           | 23.5%        | -              | -                         | 0.400       |
+| sccl_capprobe  | 11.1%        | 100%           | -                         | 0.375       |
+| capprobe_strat | 26.7%        | 100%           | -                         | 0.375       |
+| sccl_strict    | 28.6%        | 100%           | **0/4**                   | 0.200       |
+| sccl_majority  | 22.2%        | 100%           | 1/2                       | 0.200       |
+| sccl_ens_strict| 41.7%        | 100%           | **0/5**                   | 0.400       |
+
+FINDINGS
+  F5. RATE-LEVEL PROBE BLINDNESS. On every theta>0 row the E1 rule worked
+      exactly as designed — every gate with pooled rate < theta was vetoed
+      (strict 3, majority 5, ens_strict 4, anchor row 16) — yet every
+      gold-erosion update that was probe-checked passed at pooled rate 1.0
+      (0/4 on strict, 0/5 on the K=3 ensemble). The damage direction carries
+      no signal in the probe pass-rate: erosion happens on capability axes
+      the probes do not exercise. On sccl_strict the terminal damage occurred
+      on the FIRST accepted update of the arith phase itself (v0: 0.600 ->
+      0.400, gate rate 1.000) — the probe manufactured from the certified
+      skill witnessed ITSELF perfectly while family-level capability eroded.
+      This extends v5b/v6's F1 (binary insensitivity) to the rate level:
+      witness blindness, not rule looseness, is the binding constraint.
+  F6. STRICTNESS MONOTONICALLY DESTROYS PLASTICITY, ZERO EROSION GAIN.
+      Accepted updates: baseline 15 -> strict 14 -> majority 9 ->
+      ens_strict 12 -> ens_strict_anchor 1 (stall). Every unit of added gate
+      strictness traded 1:1 against learning while erosion rates stayed
+      22-42%. Tightening a blind filter filters learning, not damage. The
+      dose ordering of cap-vetoes even INVERTED vs pre-registered H1b
+      (strict 3 < majority 5 < baseline 9) because trajectory divergence
+      dominates per-gate strictness.
+  F7. THE NO-DAMAGE ENVELOPE IS THE BASE MODEL, AND IT IS REACHABLE. The
+      degenerate anchor row (1 update) kept arith at frozen level (0.600)
+      with the best ACC (0.738), best BWT (+0.257), best frontier (+0.713).
+      All erosion is carried by ACCEPTED updates; a gate that blocked damage
+      while keeping ~12 useful updates (ens_strict's learning volume) would
+      land near that envelope. The headroom is real; the missing ingredient
+      is a witness that sees the damage direction.
+  F8. WITNESS WIDTH HELPS WITHIN THE CERTIFIED MANIFOLD (H2 PASS): K=3
+      ensembles lifted arith 0.200 -> 0.400 vs K=1 at the same theta by
+      vetoing cross-family updates that broke a witnessed axis (4 vetoes,
+      incl. string/drift-phase updates). But 5 erosions still passed at
+      rate 1.0 — width over the SAME axis family (variants of certified
+      skills) does not reach the generalization axis the gold holdout
+      measures.
+
+MECHANISM CONCLUSION (E1)
+  Thresholds over blind witnesses are provably inert. The v5b->v6->v7 arc
+  has now eliminated three candidate explanations for persistent arith
+  erosion: (1) rule looseness (any-of-n) — eliminated, rate rules engage
+  and veto correctly; (2) witness count — eliminated, K=3 ensembles catch
+  cross-family breaks but not erosions; (3) threshold height — eliminated,
+  theta=1.0 changes nothing because erosion gates pass at full rate. What
+  remains: the probes test REPRODUCTION of certified skills (numeric/
+  paraphrase variants of tasks the model already solved) while erosion hits
+  GENERALIZATION to new instances of the family — the axis only the gold
+  holdout measures. Probes manufactured from certified skills live on the
+  memorized manifold; the damaged capability lives off it.
+
+FALLBACK DECISION (with pre-registered deviation, recorded per rule R4)
+  E1 fully failed (H1 FAIL at both doses, H1b FAIL), so the pre-registered
+  fallback nominally routes to E2 (A-GEM-style probe-gradient projection on
+  the certified probe pool). The v7 telemetry FALSIFIES E2's premise before
+  it runs: a gradient constraint set sees the damage direction only if the
+  probe LOSS sees it, and F5 shows the probe outcomes carry no damage signal
+  (erosions pass at rate 1.0 across K=1 and K=3 pools) — projecting away
+  the probe-loss-conflicting component of the update gradient leaves the
+  invisible damage direction untouched. Running E2 on the current witness
+  would spend ~8h of GPU to confirm a premise the artifacts already refute.
+  DEVIATION: instead of E2-as-designed, Branch F attacks the binding
+  constraint directly — witness COVERAGE — by manufacturing probes from
+  UNTRAINED tasks (generalization witnesses) rather than certified skills
+  (reproduction witnesses), reusing the validated E1 rate machinery. E2 is
+  retained as a later composition candidate (gradient projection over a
+  witness that CAN see the damage may yet help). This deviation and its
+  evidence base are recorded here BEFORE any Branch F implementation, per
+  the project's pre-registration discipline.
+
+---
+
+BRANCH F PRE-REGISTRATION — G1 GENERALIZATION WITNESSES (v8 ladder)
+(2026-08-28, BEFORE implementation; config configs/sccl_v8.json)
+
+MECHANISM DESIGN
+  Certified-skill cap probes witness REPRODUCTION; gold erosion lives on the
+  GENERALIZATION axis (F5/F8: every erosion passed at pooled rate 1.0, even
+  K=3 ensembles; terminal damage hit v0, the first accepted update). G1
+  manufactures probes from UNTRAINED future stream tasks — the model must
+  solve a NEW instance of the family at probe-commit time, so the probe
+  lives off the memorized manifold and witnesses the same axis the gold
+  holdout measures. When an update breaks that witness, the gate sees it.
+  Probes are manufactured with the EXISTING gold-free selfcert path
+  (spec-only test generation; selfcert.py passed the v5b C5 AST audit), so
+  the learning loop stays gold-free.
+
+  Manufacture protocol (per row, per family f):
+  1. AT FIRST CONTACT with family f (first episode of that family, BEFORE
+     any update on f — this covers the v0 damage window F5 found on
+     sccl_strict): manufacture G=1 generalization probe from the NEXT
+     UNTRAINED task of f: candidate solution from the current model +
+     selfcert tests from the task SPEC (no gold fields), verified (must
+     pass consensus tests) and committed kind=cap_probe with task_id
+     "<task_id>:g" (the ":g" suffix distinguishes generalization witnesses
+     from ":c" certified variants; no ":c" substring, so existing pool
+     dedup treats each as a distinct source).
+     If the candidate fails selfcert verification, try the next untrained
+     task of the family; if none can be certified, the family has no gen
+     witness (logged; telemetry counts coverage).
+  2. RETIREMENT: when task T (source of a live gen probe) becomes the
+     current training task, its gen probe is REMOVED from the cap pool
+     before training on T — a probe from an already-trained task would
+     degrade to a reproduction witness and contaminate the coverage claim.
+  3. REFRESH: after T is attempted, manufacture a replacement gen probe
+     from the next untrained task of f, maintaining G=1 per family while
+     untrained tasks remain. When f's training tasks are exhausted, its
+     certified-skill probes continue to cover reproduction (cross-family
+     generalization is still witnessed by the other families' live gen
+     probes).
+  4. POOL SLOTS: gen probes occupy DEDICATED slots, never evicted by
+     certified probes; certified probes keep their existing K rule. A
+     checked gate therefore regenerates up to K certified + G gen probes
+     per family.
+
+  Reused machinery (no redesign): veto strata, pooled-rate margin recheck
+  (cap_margin=2, denominators {3,5}), theta rule (cap_retain_min /
+  cap_samples), anchor penalty, degenerate-row guard, all E1 wiring.
+
+HYPOTHESES (registered thresholds)
+  Ladder (7 rows; idx0-3 are the v5b/v6/v7 determinism prefix, bit-identical
+  expected, seeds 42+idx):
+    0 frozen            42
+    1 sccl              43
+    2 sccl_capprobe     44
+    3 sccl_capprobe_strat            45  (reproducible capability baseline)
+    4 sccl_genprobe                  46  (strat + G=1 gen witnesses, legacy
+                                          any-pass rule on the joint pool)
+    5 sccl_genprobe_strict           47  (+ theta=1.0, n=3 pooled-rate rule)
+    6 sccl_genprobe_strict_anchor    48  (+ anchor lambda=0.1) — breakthrough cell
+
+  H1 (coverage main effect):  genprobe.arith > 0.375 (beats the
+      reproducible v5b/v6/v7 capability baseline under the SAME any-pass
+      rule; the only change is witness coverage).
+  H2 (coverage + sensitivity): genprobe_strict.arith >= max(0.375,
+      genprobe.arith) AND accepted updates >= 5 (anti-stall guard from F6:
+      strictness over a SEEING witness must not freeze learning; rows with
+      <5 updates are degenerate and excluded from maxima, as before with <3).
+  H3 (composition): genprobe_strict_anchor.arith >= max(gen rows' arith)
+      AND ACC >= max(gen rows' ACC), degenerate rows excluded.
+  M1 (mechanism, telemetry-recorded, not gated): gen-witness SENSITIVITY —
+      fraction of gold-erosion accepted updates (probe-checked) whose gate
+      log shows at least one ":g" probe failing or pooled rate < theta.
+      v7 baseline: 0% (0/4 strict, 0/5 ensemble). Target > 50%. M1 is the
+      mechanism success criterion: even if arith misses 0.55, sensitivity
+      >50% confirms coverage is the binding constraint and routes to dose
+      scaling (G=2, refresh timing) in v9.
+  BREAKTHROUGH (unchanged axis, anti-stall added): genprobe_strict_anchor
+      arith >= 0.55 AND frontier >= sccl frontier - 0.02 AND accepted
+      updates >= 5 -> multi-seed (seeds 43/44 via scripts/v8_multiseed.py)
+      before any headline claim. Degenerate breakthrough cell forces FAIL.
+
+FAIL-CLOSED CHECKS (v8_check.py; any failure -> verdict FAIL regardless)
+  C1 determinism: idx0-3 bit-match runs/sccl_v7 idx0-3 on every report
+     metric, frontier, and family holdout score.
+  C2 engagement: each gen row manufactures >= 1 gen probe in a family
+     before that family's first update; checked gates in gen rows have
+     cap_rates covering at least one ":g" task_id (when a gen probe is
+     live); logged cap_retain_min/cap_samples == config on theta>0 rows.
+  C3 retirement/anti-contamination: no gen probe from task T is checked at
+     a gate during or after T's own training episode (retired before use);
+     every ":g" task_id is a stream TRAINING task (disjoint from the gold
+     holdout task ids recorded in metrics eval_detail.final_heldout) —
+     a holdout-sourced probe is gold leakage and fails the run.
+  C4 isolation: frozen/sccl/capprobe/capprobe_strat rows show ZERO gen
+     activity (no ":g" probes, no manufacture events); theta=0 rows log no
+     E1 fields; anchor row logs anchor_pen > 0 on its gates.
+  C5 gold-freedom: AST audit of gcl/selfcert.py + gcl/vault.py + gcl/env.py
+     over the manufacture AND gate paths — probe manufacture consumes only
+     prompt/spec fields; accept/reject consumes only probe regeneration
+     results; gold labels, reference answers, and holdout scores appear in
+     no decision path. (v5b/v6/v7 audit extended to the new code path.)
+
+EXPECTED-RANGE SANITY (pre-run calibration, not pass/fail)
+  Gen probes are HARDER than certified variants (untrained tasks, temp 0.7
+  regeneration), so even a healthy model shows rate < 1 on some gen probes;
+  strict rows will veto more than v7 strict did, and the margin recheck
+  (denominators {3,5}) is the relief valve. If genprobe_strict accepts < 5
+  updates the witness is too harsh at theta=1.0 — that is a dose finding
+  (record; v9 lowers theta or G), not an abort. Expected accepted-update
+  ordering: genprobe >= genprobe_strict >= genprobe_strict_anchor.
+  Inversion is itself a finding (record, don't abort).
+
+COST/SEQUENCING
+  7 rows x ~32 episodes; v7's 8 rows took ~6.5h, so ~6h expected (the extra
+  gate checks are offset by one fewer row). Manufacture adds 4 families x
+  ~8 refreshes of selfcert generation per gen row — bounded, GPU-cheap.
+  Smoke first: configs/_smoke_v8.json (2 episodes, gen rows only) must show
+  ":g" probes manufactured at first contact + gate records containing ":g"
+  task_ids, with no holdout id anywhere in gate artifacts. Then full
+  ladder, watcher runs v8_check.py on finalization.
+
+FALLBACK (pre-registered)
+  G1 fully fails (H1 FAIL and M1 sensitivity <= 50%) -> the erosion is not
+  witnessable by selfcert-quality tests on untrained tasks; the remaining
+  explanation is that SELF-CERTIFIED TESTS are too weak to proxy gold tests
+  on the generalization axis. Route: Branch G = stronger gold-free test
+  generation (multi-sample consensus / property-based invariants / oracle-
+  free consistency checks across paraphrase clusters), decided and pre-
+  registered after the verdict. G1 partially succeeds (M1 > 50% but H1/H2
+  FAIL) -> dose scaling in v9 (G=2, theta in {0.5, 2/3} on the joint pool,
+  earlier refresh), per rule R3, plus E2 composition as a candidate row.
+  H1 PASS but BREAKTHROUGH FAIL -> v9 composes G1 with E2 (projection over
+  the now-seeing witness) and/or anchor tuning; pre-registered before run.
