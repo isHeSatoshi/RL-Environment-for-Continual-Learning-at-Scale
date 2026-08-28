@@ -137,6 +137,19 @@ class ExperimentConfig:
     # bit-identical); sccl_capprobe_pools overrides per learner name.
     sccl_capprobe_pool: int = 1
     sccl_capprobe_pools: dict = field(default_factory=dict)
+    # ---- SCCL v7 (Branch E, E1): pass-rate margin veto ----
+    # v6 telemetry (F1): 100% probe insensitivity under the any-of-n retain
+    # rule — a probe whose regeneration quality degrades to 50% still
+    # "passes" as long as one of n draws survives. E1 measures the pass RATE
+    # over cap_samples regenerations per cap probe and retains iff
+    # rate >= sccl_cap_retain_min (theta). theta <= 0 keeps the EXACT legacy
+    # any-pass path (bit-identical for all pre-v7 rows); the *_mins / *_map
+    # dicts override per learner name. sccl_cap_samples=0 falls back to
+    # sccl_replay_samples. Pre-registered in RESEARCH_NOTES_v5.md (Branch E).
+    sccl_cap_retain_min: float = 0.0
+    sccl_cap_retain_mins: dict = field(default_factory=dict)
+    sccl_cap_samples: int = 0
+    sccl_cap_samples_map: dict = field(default_factory=dict)
     # output
     out_dir: str = "runs/run"
     seed: int = 42

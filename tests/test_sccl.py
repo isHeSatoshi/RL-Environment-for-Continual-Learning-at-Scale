@@ -1715,3 +1715,242 @@ def test_v6_learners_registered():
     assert LEARNERS["sccl_capens_anchor"] is SCCLCapEnsAnchorLearner
     for cls in (SCCLCapEnsLearner, SCCLCapAnchorLearner, SCCLCapEnsAnchorLearner):
         assert issubclass(cls, SCCLLearner)
+
+
+# ---------------------------------------------------------------------------
+# SCCL v7 (Branch E, E1): pass-rate margin veto.
+# v6 telemetry (F1) measured 100% probe insensitivity under the any-of-n
+# retain rule: every probe-checked erosion passed its probes, because a probe
+# whose regeneration quality degrades to 50% still "passes" as long as ONE of
+# n draws survives. E1 measures the pass RATE over n regeneration draws per
+# cap probe and retains iff rate >= cap_retain_min (theta). These tests pin:
+#   (a) theta<=0 executes the EXACT legacy any-pass path (bit-identity for all
+#       pre-v7 rows: same draws, same verdicts, no cap_rates in the result),
+#   (b) theta>0 vetoes on sub-threshold rate and reports per-probe rates,
+#   (c) under the bounded-damage guard the margin draws POOL into the rate
+#       (rate-consistent relief, not an any-pass escape hatch), and
+#   (d) the env wiring persists cap_rates + dose on the gate record.
+# ---------------------------------------------------------------------------
+
+_GOOD_CODE = "```python\ndef add2(a, b):\n    return a + b\n```"
+_BAD_CODE = "```python\ndef add2(a, b):\n    return a - b\n```"
+
+
+class _RateEngine:
+    """Regeneration engine that returns a scripted draw pattern per prompt.
+
+    `pattern` cycles over draws: pattern[i % len(pattern)] is draw i. Records
+    every requested batch size so tests can pin the number of draws.
+    """
+
+    def __init__(self, pattern):
+        self.pattern = list(pattern)
+        self.calls = []
+        self._draw = 0
+
+    def sample_candidates(self, prompt, n, temperature=0.7, top_p=0.95,
+                          adapter_on=True, max_new_tokens=None):
+        n = max(1, n)
+        self.calls.append(n)
+        out = [self.pattern[(self._draw + j) % len(self.pattern)]
+               for j in range(n)]
+        self._draw += n
+        return out
+
+
+def _cap_vault():
+    v = SelfCertVault()
+    assert v.commit_cap_probe("t1:c0", "famA", "variant spec",
+                              "PROMPT v\n```python\n", _CAP_CODE,
+                              _CAP_TESTS_VARIANT, 0.9)
+    return v
+
+
+def test_v7_default_config_is_inert():
+    """All E1 switches default OFF (theta=0) so pre-v7 rows stay bit-identical."""
+    import inspect
+    from gcl.vault import SelfCertVault
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    assert cfg.sccl_cap_retain_min == 0.0
+    assert cfg.sccl_cap_retain_mins == {}
+    assert cfg.sccl_cap_samples == 0
+    assert cfg.sccl_cap_samples_map == {}
+    sig = inspect.signature(SelfCertVault.selfreplay_veto)
+    assert sig.parameters["cap_retain_min"].default == 0.0
+    assert sig.parameters["cap_samples"].default == 0
+
+
+def test_rrv_e1_theta_zero_is_exact_legacy_path():
+    """theta=0 must behave EXACTLY like v5b/v6 even when cap_samples is set:
+    same draw count (n_samples, not cap_samples), any-of-n retain rule, and
+    NO cap_rates key in the result (legacy gate-record shape)."""
+    ver = Verifier(sandbox=PythonSandbox())
+    # 1-of-3 draws broken: any-pass retains, a strict rule would veto
+    eng = _RateEngine([_GOOD_CODE, _GOOD_CODE, _BAD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=3,
+                                       check_cap_probes=1, cap_samples=3)
+    assert not res["veto"], "theta=0 keeps the any-of-n retain rule"
+    assert "cap_rates" not in res, "theta=0 must not add E1 telemetry"
+    assert eng.calls == [3], "theta=0 draws n_samples, ignoring cap_samples"
+    # cap_samples set to a different value: still ignored at theta=0
+    eng = _RateEngine([_GOOD_CODE, _GOOD_CODE, _BAD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1, cap_samples=3)
+    assert not res["veto"] and "cap_rates" not in res
+    assert eng.calls == [2], "legacy path must request exactly n_samples draws"
+
+
+def test_rrv_e1_strict_vetoes_partial_pass():
+    """theta=1.0 (strict): a probe at 1/3 health passed under v6's any-pass
+    rule must now veto, with its measured rate reported for telemetry."""
+    ver = Verifier(sandbox=PythonSandbox())
+    eng = _RateEngine([_GOOD_CODE, _BAD_CODE, _BAD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1,
+                                       cap_retain_min=1.0, cap_samples=3)
+    assert res["veto"] and res["broke_cap"] == ["t1:c0"], res
+    assert res["checked_cap"] == 1
+    assert res["cap_rates"] == {"t1:c0": {"passes": 1, "n": 3}}, res["cap_rates"]
+    assert eng.calls == [3], "E1 draws cap_samples, not n_samples"
+    # all draws pass -> retained, rate 3/3
+    eng = _RateEngine([_GOOD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1,
+                                       cap_retain_min=1.0, cap_samples=3)
+    assert not res["veto"]
+    assert res["cap_rates"] == {"t1:c0": {"passes": 3, "n": 3}}
+
+
+def test_rrv_e1_majority_threshold():
+    """theta=2/3 (majority): 2/3 draws passing is retained; 1/3 vetoes. This
+    is the dose-response pair the v7 ladder A/Bs against the strict dose."""
+    ver = Verifier(sandbox=PythonSandbox())
+    eng = _RateEngine([_GOOD_CODE, _GOOD_CODE, _BAD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1,
+                                       cap_retain_min=2 / 3, cap_samples=3)
+    assert not res["veto"], "2/3 rate clears the majority threshold"
+    assert res["cap_rates"] == {"t1:c0": {"passes": 2, "n": 3}}
+    eng = _RateEngine([_GOOD_CODE, _BAD_CODE, _BAD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1,
+                                       cap_retain_min=2 / 3, cap_samples=3)
+    assert res["veto"] and res["broke_cap"] == ["t1:c0"], \
+        "1/3 rate must veto under the majority threshold"
+
+
+def test_rrv_e1_margin_pools_into_rate():
+    """Guard semantics under E1: the margin re-check draws POOL into the rate
+    (rate-consistent relief), they are NOT an any-pass escape hatch."""
+    ver = Verifier(sandbox=PythonSandbox())
+    # 2/3 < theta=0.8 -> guard margin of 2 good draws -> pooled 4/5 = 0.8 OK
+    eng = _RateEngine([_GOOD_CODE, _GOOD_CODE, _BAD_CODE, _GOOD_CODE, _GOOD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1, cap_margin=2,
+                                       cap_retain_min=0.8, cap_samples=3)
+    assert not res["veto"], "pooled margin rate 4/5 clears theta=0.8"
+    assert eng.calls == [3, 2], "margin re-check draws exactly cap_margin"
+    assert res["cap_rates"] == {"t1:c0": {"passes": 4, "n": 5}}
+    # 2/3 < theta=0.8, margin draws still leave pooled 3/5 = 0.6 -> veto
+    eng = _RateEngine([_GOOD_CODE, _GOOD_CODE, _BAD_CODE, _GOOD_CODE, _BAD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1, cap_margin=2,
+                                       cap_retain_min=0.8, cap_samples=3)
+    assert res["veto"] and res["broke_cap"] == ["t1:c0"], \
+        "pooled margin may not rescue a rate still below theta"
+    assert res["cap_rates"] == {"t1:c0": {"passes": 3, "n": 5}}
+
+
+def test_rrv_e1_extraction_failure_counts_as_nonpass():
+    """A draw that yields no extractable code counts against the rate — the
+    denominator is draws REQUESTED, so the rate measures behaviour, not the
+    extraction yield of surviving candidates."""
+    ver = Verifier(sandbox=PythonSandbox())
+    eng = _RateEngine([_GOOD_CODE, "no code here at all", _GOOD_CODE])
+    res = _cap_vault().selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                                       check_cap_probes=1,
+                                       cap_retain_min=1.0, cap_samples=3)
+    assert res["veto"], "an unextractable draw must break the strict rate"
+    assert res["cap_rates"] == {"t1:c0": {"passes": 2, "n": 3}}
+
+
+def test_rrv_e1_math_rate():
+    """E1 applies to math probes too: rate = matching draws / requested."""
+    ver = Verifier(sandbox=PythonSandbox())
+    math_prompt = ("Solve and give ONLY the final numeric answer.\n"
+                   "What is 6 times 7?\nAnswer: ")
+    v = SelfCertVault()
+    assert v.commit_cap_probe("m1:c0", "arith", "What is 6 times 7?",
+                              math_prompt, "42", [], 0.86, domain="math")
+    eng = StubEngine()
+    eng.math_answers = ["42", "41", "42"]
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1,
+                            cap_retain_min=1.0, cap_samples=3)
+    assert res["veto"] and res["broke_cap"] == ["m1:c0"], \
+        "one wrong math draw must veto under the strict rate"
+    assert res["cap_rates"] == {"m1:c0": {"passes": 2, "n": 3}}
+    eng = StubEngine()
+    eng.math_answers = ["42", "41", "42"]
+    res = v.selfreplay_veto(eng, ver, check_skills=0, n_samples=2,
+                            check_cap_probes=1,
+                            cap_retain_min=2 / 3, cap_samples=3)
+    assert not res["veto"], "2/3 math rate clears the majority threshold"
+
+
+def test_e1_env_wiring_logs_dose_and_rates():
+    """Env-level wiring: a theta>0 learner's gate record persists the dose
+    (cap_retain_min, cap_n) and per-probe cap_rates; a theta=0 learner's gate
+    record carries NONE of the E1 fields (legacy shape)."""
+    from gcl.curriculum import Family
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg._learner_name = "sccl_e1"
+    cfg.sccl_learners = ["sccl_e1"]
+    cfg.sccl_nogate_learners = []
+    cfg.sccl_gate_probe = 0
+    cfg.sccl_capprobe_learners = ["sccl_e1"]
+    cfg.sccl_capprobe_check = 1
+    cfg.sccl_cap_retain_mins = {"sccl_e1": 1.0}
+    cfg.sccl_cap_samples_map = {"sccl_e1": 3}
+    eng = FakeEngine(cfg, regen_passes=True)
+    ver = Verifier(sandbox=PythonSandbox())
+    vault = SelfCertVault()
+    t1 = _poisoned_task()
+    t2 = Task(task_id="t_e1_ok", family="fam", domain="code",
+              prompt="Return the sum of two integers a and b.",
+              test_code="assert add2(2, 2) == 4",
+              reference_answer="def add2(a, b):\n    return 4",
+              entry_point="add2")
+    env = GroundedContinualEnv(cfg, eng, ver,
+                               [Family(name="fam", tasks=[t1, t2], holdout=[])],
+                               holdout=[], vault=vault, sccl=True)
+    vault.commit_cap_probe("seed:c0", "fam", "variant spec",
+                           "PROMPT v\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9)
+    _, _, _, s1 = env.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                  metadata={"sccl": _cert_meta(found=True)}))
+    g1 = s1["update_info"]["gate"]
+    assert g1.get("cap_retain_min") == 1.0, g1
+    assert g1.get("cap_n") == 3, g1
+    assert g1.get("cap_rates", {}).get("seed:c0") == {"passes": 3, "n": 3}, g1
+    assert not g1["veto"], "all-pass regen must clear the strict rate"
+    # theta=0 learner: no E1 fields on the gate record
+    cfg2 = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg2._learner_name = "sccl_legacy"
+    cfg2.sccl_learners = ["sccl_legacy"]
+    cfg2.sccl_nogate_learners = []
+    cfg2.sccl_gate_probe = 0
+    cfg2.sccl_capprobe_learners = ["sccl_legacy"]
+    cfg2.sccl_capprobe_check = 1
+    eng2 = FakeEngine(cfg2, regen_passes=True)
+    env2 = GroundedContinualEnv(cfg2, eng2, ver,
+                                [Family(name="fam", tasks=[t1, t2], holdout=[])],
+                                holdout=[], vault=SelfCertVault(), sccl=True)
+    env2.vault.commit_cap_probe("seed:c0", "fam", "variant spec",
+                                "PROMPT v\n```python\n", _CAP_CODE,
+                                _CAP_TESTS_VARIANT, 0.9)
+    _, _, _, s2 = env2.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                   metadata={"sccl": _cert_meta(found=True)}))
+    g2 = s2["update_info"]["gate"]
+    assert "cap_rates" not in g2 and "cap_retain_min" not in g2 \
+        and "cap_n" not in g2, "theta=0 gate record must keep the legacy shape"

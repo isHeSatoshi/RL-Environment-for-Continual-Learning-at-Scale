@@ -309,6 +309,16 @@ class GroundedContinualEnv:
             _cpools = getattr(self.cfg, "sccl_capprobe_pools", {}) or {}
             cap_pool = (int(_cpools.get(name, getattr(self.cfg, "sccl_capprobe_pool", 1)))
                         if cap_learner else 1)
+            # ---- SCCL v7 (Branch E, E1): pass-rate margin veto. theta<=0
+            # executes the legacy any-pass path exactly (bit-identical rows). ----
+            _rmins = getattr(self.cfg, "sccl_cap_retain_mins", {}) or {}
+            cap_retain_min = (float(_rmins.get(
+                name, getattr(self.cfg, "sccl_cap_retain_min", 0.0)))
+                if cap_learner else 0.0)
+            _csamps = getattr(self.cfg, "sccl_cap_samples_map", {}) or {}
+            cap_samples = (int(_csamps.get(
+                name, getattr(self.cfg, "sccl_cap_samples", 0)))
+                if cap_learner else 0)
             cap_margin = 0
             cap_armed = False
             if cap_check > 0 and task is not None:
@@ -331,7 +341,9 @@ class GroundedContinualEnv:
                 stratified=strat,
                 check_cap_probes=cap_check,
                 cap_margin=cap_margin,
-                cap_pool=cap_pool)
+                cap_pool=cap_pool,
+                cap_retain_min=cap_retain_min,
+                cap_samples=cap_samples)
             if cap_check > 0:
                 self._cap_attempts += 1
                 if veto["veto"] and veto.get("broke_cap"):
@@ -347,6 +359,13 @@ class GroundedContinualEnv:
                          "cap_guard_armed": cap_armed,
                          "skipped": veto.get("skipped", []),
                          "stratified": veto.get("stratified", False)})
+            if cap_check > 0 and cap_retain_min > 0:
+                # E1 engagement telemetry (v7): per-probe pass rates + the
+                # configured dose, persisted for the fail-closed checker.
+                gate["cap_rates"] = veto.get("cap_rates", {})
+                gate["cap_retain_min"] = cap_retain_min
+                gate["cap_n"] = (cap_samples if cap_samples > 0
+                                 else int(getattr(self.cfg, "sccl_replay_samples", 2)))
             accepted = not veto["veto"]
             # ---- Gold telemetry ONLY (post-hoc gate-agreement analysis). ----
             # These scores never enter `accepted`; they let the paper quantify

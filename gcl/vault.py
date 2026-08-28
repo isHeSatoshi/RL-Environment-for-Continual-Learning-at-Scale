@@ -523,6 +523,28 @@ class SelfCertVault(SkillVault):
                 continue
         return False
 
+    def _pass_hits(self, codes: List[str], tests: List[str], verifier: Any) -> int:
+        """SCCL v7 (E1): per-candidate pass count with NO short-circuit.
+
+        Same per-candidate criterion as _any_passes (pass_rate >= 1.0 and
+        success), but counts every passing candidate so the caller can form a
+        pass RATE over the number of draws requested. A draw that fails to
+        extract code never reaches this function and therefore counts as a
+        non-pass at the caller — the rate measures behaviour, not yield.
+        """
+        joined = "\n".join(tests)
+        hits = 0
+        for c in codes:
+            if not (c or "").strip():
+                continue
+            try:
+                _, info, _ = verifier.reward(domain="code", code=c, test_code=joined)
+                if float(info.get("pass_rate", 0.0)) >= 1.0 and bool(info.get("success", False)):
+                    hits += 1
+            except Exception:
+                continue
+        return hits
+
     @staticmethod
     def _stratified_pool(skills: List[Any], k: int) -> List[Any]:
         """SCCL v5: family-stratified check pool (gold-free).
@@ -548,7 +570,8 @@ class SelfCertVault(SkillVault):
                         sample_temp: float = 0.7, check_probes: int = 0,
                         check_math: int = 0, stratified: bool = False,
                         check_cap_probes: int = 0, cap_margin: int = 0,
-                        cap_pool: int = 1) -> Dict[str, Any]:
+                        cap_pool: int = 1, cap_retain_min: float = 0.0,
+                        cap_samples: int = 0) -> Dict[str, Any]:
         """Self-Replay Veto (RRV) — the gold-free forgetting detector.
 
         For each recently committed self-certified skill, REGENERATE solutions
@@ -581,6 +604,15 @@ class SelfCertVault(SkillVault):
             witnesses a single skill axis of a heterogeneous family and passed
             every update that destroyed an unwitnessed axis. cap_pool=1 (the
             default) is exactly the v5b newest-per-family behaviour.
+          * cap_retain_min>0 — SCCL v7 (Branch E, E1): PASS-RATE margin veto.
+            Instead of retaining a cap probe when ANY of the regeneration
+            draws passes (v5b/v6 rule, blind to rate degradation: a probe at
+            50% health still "passes" if one draw survives), measure the pass
+            RATE over n = cap_samples (or n_samples) draws and retain iff
+            rate >= cap_retain_min. Under the bounded-damage guard the margin
+            draws are POOLED into the rate. cap_retain_min <= 0 executes the
+            exact legacy any-pass path (bit-identical). Per-probe rates are
+            returned in "cap_rates" for engagement telemetry.
 
         Note we deliberately do NOT fall back to executing the stored code: that
         artifact trivially passes its own tests regardless of the model's state,
@@ -665,16 +697,21 @@ class SelfCertVault(SkillVault):
                 if not ok:
                     broke_math.append(s.task_id)
 
-        # 4) capability probes (SCCL v5b / v6): certified capability variants,
-        # both domains. This stratum polices the instance-vs-capability gap:
-        # memorized instances can keep passing their stored self-tests while
-        # the capability the variants measure erodes inside accepted updates.
-        # v5b checks the newest probe per family; v6 (Branch D) checks an
-        # ENSEMBLE of up to cap_pool distinct-source-skill probes per family,
-        # because a heterogeneous family has multiple skill axes and one probe
-        # witnesses only one of them. cap_pool=1 == v5b (bit-identical).
+        # 4) capability probes (SCCL v5b / v6 / v7): certified capability
+        # variants, both domains. This stratum polices the
+        # instance-vs-capability gap: memorized instances can keep passing
+        # their stored self-tests while the capability the variants measure
+        # erodes inside accepted updates. v5b checks the newest probe per
+        # family; v6 (Branch D) checks an ENSEMBLE of up to cap_pool
+        # distinct-source-skill probes per family, because a heterogeneous
+        # family has multiple skill axes and one probe witnesses only one of
+        # them. cap_pool=1 == v5b (bit-identical). v7 (Branch E, E1):
+        # cap_retain_min>0 upgrades the retain rule from any-of-n to
+        # pass-rate >= threshold; cap_retain_min<=0 keeps the legacy path.
         checked_cap = 0
         broke_cap: List[str] = []
+        cap_rates: Dict[str, Dict[str, int]] = {}
+        cap_n = max(1, int(cap_samples or n_samples))
         if check_cap_probes > 0:
             caps = self._cap_pool_by_family(max(1, int(cap_pool)))
             for fam in sorted(caps):
@@ -682,6 +719,35 @@ class SelfCertVault(SkillVault):
                 if getattr(s, "domain", "code") == "math":
                     want = format_number(str(s.code))
                     checked_cap += 1
+                    if cap_retain_min > 0:
+                        def _math_hits(samples: List[str]) -> int:
+                            hits = 0
+                            for r in samples:
+                                a = extract_number(r or "")
+                                if a is not None and format_number(a) == want:
+                                    hits += 1
+                            return hits
+
+                        try:
+                            regen = engine.sample_candidates(s.prompt, n=cap_n,
+                                                             temperature=sample_temp)
+                        except Exception:
+                            regen = []
+                        hits = _math_hits(regen)
+                        denom = cap_n
+                        if hits / cap_n < cap_retain_min and cap_margin > 0:
+                            try:
+                                extra = engine.sample_candidates(s.prompt,
+                                                                 n=cap_margin,
+                                                                 temperature=sample_temp)
+                            except Exception:
+                                extra = []
+                            hits += _math_hits(extra)
+                            denom = cap_n + cap_margin
+                        cap_rates[s.task_id] = {"passes": hits, "n": denom}
+                        if hits / denom < cap_retain_min:
+                            broke_cap.append(s.task_id)
+                        continue
 
                     def _math_ok(samples: List[str]) -> bool:
                         for r in samples:
@@ -714,6 +780,18 @@ class SelfCertVault(SkillVault):
                     skipped.append(s.task_id)
                     continue
                 checked_cap += 1
+                if cap_retain_min > 0:
+                    hits = self._pass_hits(_regen_codes(s.prompt, cap_n),
+                                           tests, verifier)
+                    denom = cap_n
+                    if hits / cap_n < cap_retain_min and cap_margin > 0:
+                        hits += self._pass_hits(
+                            _regen_codes(s.prompt, cap_margin), tests, verifier)
+                        denom = cap_n + cap_margin
+                    cap_rates[s.task_id] = {"passes": hits, "n": denom}
+                    if hits / denom < cap_retain_min:
+                        broke_cap.append(s.task_id)
+                    continue
                 codes = _regen_codes(s.prompt)
                 if self._any_passes(codes, tests, verifier):
                     continue
@@ -724,11 +802,16 @@ class SelfCertVault(SkillVault):
                 broke_cap.append(s.task_id)
 
         all_broke = broke + broke_probes + broke_math + broke_cap
-        return {"veto": bool(all_broke),
-                "reason": ("rrv_regress:" + ",".join(all_broke)) if all_broke else "ok",
-                "checked": checked, "broke": broke,
-                "checked_probes": checked_probes, "broke_probes": broke_probes,
-                "checked_math": checked_math, "broke_math": broke_math,
-                "checked_cap": checked_cap, "broke_cap": broke_cap,
-                "skipped": skipped, "n_skills": len(self._skills),
-                "stratified": stratified}
+        result = {"veto": bool(all_broke),
+                  "reason": ("rrv_regress:" + ",".join(all_broke)) if all_broke else "ok",
+                  "checked": checked, "broke": broke,
+                  "checked_probes": checked_probes, "broke_probes": broke_probes,
+                  "checked_math": checked_math, "broke_math": broke_math,
+                  "checked_cap": checked_cap, "broke_cap": broke_cap,
+                  "skipped": skipped, "n_skills": len(self._skills),
+                  "stratified": stratified}
+        if cap_retain_min > 0:
+            # E1 engagement telemetry: per-probe pass rate (post-margin).
+            # Only present on theta>0 calls so legacy gate records keep shape.
+            result["cap_rates"] = cap_rates
+        return result
