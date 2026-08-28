@@ -414,6 +414,55 @@ class SCCLCapEnsAnchorLearner(SCCLLearner):
     name = "sccl_capens_anchor"
 
 
+class SCCLStrictLearner(SCCLLearner):
+    """SCCL v7 (Branch E, E1) high-dose row: pass-rate margin veto at
+    theta=1.0 (strict — EVERY regeneration draw of a cap probe must pass).
+    v6 telemetry (F1) measured 100% probe insensitivity under the any-of-n
+    retain rule: every probe-checked erosion passed its probes, because a
+    probe whose regeneration quality degrades to 50% still "passes" as long
+    as one of n draws survives. E1 upgrades the veto's evidence from a
+    binary existential to a measured pass rate over cap_samples draws
+    (cfg.sccl_cap_retain_mins / sccl_cap_samples_map, wired in env.py).
+    Built on the v5b stratified capability gate (K=1 pool). This class only
+    supplies the registry name; wiring is name-based. Fully gold-free."""
+    name = "sccl_strict"
+
+
+class SCCLMajorityLearner(SCCLLearner):
+    """SCCL v7 (Branch E, E1) low-dose row: pass-rate margin veto at
+    theta=2/3 (majority of the cap_samples draws must pass). Together with
+    sccl_strict this forms the pre-registered dose-response pair (H1/H1b):
+    if subthreshold capability damage degrades pass RATE before it breaks
+    the probe, the strict dose should veto more and protect arith more; if
+    the extra vetoes are pure sampling noise, the majority dose bounds the
+    plasticity tax. Same v5b stratified capability base (K=1 pool). Fully
+    gold-free."""
+    name = "sccl_majority"
+
+
+class SCCLEnsStrictLearner(SCCLLearner):
+    """SCCL v7 (Branch E, E1) width+sensitivity row: capability-probe
+    ENSEMBLE (K=3 distinct-source-skill pool, v6 Branch D) combined with the
+    strict pass-rate veto (theta=1.0). v6 showed width alone did not lift
+    arith (witness count is not witness sensitivity); H2 tests whether width
+    adds to sensitivity. Stratified capability base. Fully gold-free."""
+    name = "sccl_ens_strict"
+
+
+class SCCLEnsStrictAnchorLearner(SCCLLearner):
+    """SCCL v7 (Branch E, E1) composition row — the pre-registered
+    breakthrough candidate: ensemble (K=3) + strict pass-rate veto
+    (theta=1.0) + in-update base anchor (lambda=0.1). The veto now reads
+    measured pass rates (sensitivity, attacks M1'), the ensemble spans skill
+    axes (coverage), and the anchor bounds per-update drift on the weights
+    no probe inspects (M2/M3, and v6 F4's bounded-walk dynamic: the endpoint
+    is decided by the LAST damaging updates, which a sensitive veto plus
+    bounded drift must catch). Stratified capability base. Pre-registered
+    rule: arith >= 0.55 AND frontier >= sccl - 0.02 -> multi-seed before
+    headline. Fully gold-free."""
+    name = "sccl_ens_strict_anchor"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -425,5 +474,7 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLStratLearner, SCCLAnchorStratLearner,
                                  SCCLCapProbeLearner, SCCLCapProbeStratLearner,
                                  SCCLCapEnsLearner, SCCLCapAnchorLearner,
-                                 SCCLCapEnsAnchorLearner)}
+                                 SCCLCapEnsAnchorLearner,
+                                 SCCLStrictLearner, SCCLMajorityLearner,
+                                 SCCLEnsStrictLearner, SCCLEnsStrictAnchorLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

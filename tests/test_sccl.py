@@ -1954,3 +1954,16 @@ def test_e1_env_wiring_logs_dose_and_rates():
     g2 = s2["update_info"]["gate"]
     assert "cap_rates" not in g2 and "cap_retain_min" not in g2 \
         and "cap_n" not in g2, "theta=0 gate record must keep the legacy shape"
+
+
+def test_v7_learners_registered():
+    from gcl.learners.learners import (LEARNERS, SCCLLearner, SCCLStrictLearner,
+                                       SCCLMajorityLearner, SCCLEnsStrictLearner,
+                                       SCCLEnsStrictAnchorLearner)
+    assert LEARNERS["sccl_strict"] is SCCLStrictLearner
+    assert LEARNERS["sccl_majority"] is SCCLMajorityLearner
+    assert LEARNERS["sccl_ens_strict"] is SCCLEnsStrictLearner
+    assert LEARNERS["sccl_ens_strict_anchor"] is SCCLEnsStrictAnchorLearner
+    for cls in (SCCLStrictLearner, SCCLMajorityLearner,
+                SCCLEnsStrictLearner, SCCLEnsStrictAnchorLearner):
+        assert issubclass(cls, SCCLLearner)
