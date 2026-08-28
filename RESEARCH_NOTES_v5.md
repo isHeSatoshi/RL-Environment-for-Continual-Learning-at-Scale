@@ -819,3 +819,139 @@ result, so the next-branch choice is not fit to the final number):
         set): project each update's gradient off probe-loss-increasing
         directions. Continuous in-update constraint; novel constraint set.
   R4 any fail-closed C1-C5 failure -> abort interpretation, fix, rerun.
+
+========================================================================
+BRANCH E PRE-REGISTRATION — E1 PASS-RATE MARGIN VETO (v7 ladder)
+Written BEFORE any v7 implementation or run, per project discipline.
+========================================================================
+
+MECHANISM MOTIVATION (from v6 findings F1/F4)
+  F1 showed insensitivity is 100%: every probe-checked erosion passed its
+  probes, at K=1 AND K=3. But "passed" was scored under an ANY-of-n retain
+  rule (n=2 samples, temp 0.7): a probe whose regeneration quality degrades
+  from pass-rate 1.0 to 0.5 still "passes" as long as ONE of 2 draws
+  survives. Subthreshold capability damage should degrade pass RATE before
+  it breaks the probe entirely. E1 turns the veto's evidence from a binary
+  existential ("does some draw still pass?") into a measured rate
+  ("what fraction of draws pass?"), and requires the rate to clear a
+  threshold theta. This is a 1-parameter, gold-free upgrade of the exact
+  witness v6 proved insensitive — it attacks M1' (witness sensitivity)
+  directly without adding witness count (which v6 proved insufficient).
+
+DESIGN (E1 — cap_retain_min threshold on cap-probe pass rate)
+  D1. New veto parameter cap_retain_min (float, default 0.0) and
+      cap_samples (int, default 0 = fall back to n_samples). Applied ONLY
+      in the cap-probe re-check section of selfreplay_veto (math AND code
+      probe paths). Skill-stratum, legacy probe, and math-RRV checks are
+      untouched (they keep n_samples / any-pass semantics).
+  D2. Retain rule when cap_retain_min > 0: for each probe, draw
+      n = max(1, cap_samples or n_samples) regeneration samples; score each
+      (math: extract+format match to the certified answer; code: that
+      individual candidate passes ALL assert tests — evaluate every
+      candidate, no short-circuit). rate = passes / n. Retain the probe
+      iff rate >= cap_retain_min. ANY probe below theta -> broke_cap ->
+      veto.
+  D3. Guard interaction: the bounded-damage guard (cap_margin extra
+      samples when per-phase cap-veto rate >= budget 0.5) keeps its
+      trigger and ledger semantics. Under E1 the margin re-check is
+      rate-consistent: pool the initial n with the cap_margin extra
+      samples and retain iff POOLED rate >= theta (not any-pass on the
+      extras). The guard therefore adds resolution, not an escape hatch.
+  D4. Bit-identity guarantee: cap_retain_min <= 0 executes the EXACT
+      current code path (any-pass, short-circuit, margin any-pass). All
+      v5b/v6 control and determinism rows must reproduce bit-for-bit.
+  D5. Engagement telemetry: when cap_retain_min > 0 the veto returns
+      "cap_rates": {task_id: {"passes": int, "n": int}} for every checked
+      probe (final, post-margin). env.py persists cap_rates and
+      cap_retain_min on the gate record ONLY for theta>0 rows (gate
+      record shape of theta=0 rows is unchanged). This lets the checker
+      verify (a) the rule engaged, (b) the denominator is n, (c) the
+      dose-response in measured rates.
+  D6. Gold-freedom: the retain rule reads only probe regeneration against
+      probe answers/tests (both manufactured at certification from the
+      spec — no gold labels, no gold holdout, no reference answers). The
+      gate's accept/reject decision consumes nothing gold. Unchanged.
+
+CONFIG WIRING
+  - ExperimentConfig: sccl_cap_retain_min: float = 0.0 (global default),
+    sccl_cap_retain_mins: dict = {} (per-learner override, keyed by name),
+    sccl_cap_samples: int = 0 (global; 0 -> sccl_replay_samples),
+    sccl_cap_samples_map: dict = {} (per-learner override).
+  - env.py resolves effective theta and n per learner (mirrors the
+    cap_pool pattern), passes both to selfreplay_veto, logs cap_rates +
+    theta + n on the gate record for theta>0 rows.
+
+HYPOTHESES (v7 — pre-registered BEFORE the run)
+  H1 (sensitivity): at least one strict dose lifts arith above the
+     K=1 any-pass baseline: sccl_strict.arith > 0.375 OR
+     sccl_majority.arith > 0.375. (Baseline 0.375 = v5b/v6 strat rows,
+     reproduced in-ladder by row idx2.)
+  H1b (dose ordering, directional): cap-veto counts must be monotone in
+     strictness: strict >= majority >= baseline. If strict has FEWER
+     cap-vetoes than baseline, the threshold never engaged its extra
+     sensitivity -> H1 verdict is void, re-audit via cap_rates.
+  H2 (width+sensitivity): sccl_ens_strict.arith >= sccl_strict.arith
+     (ensemble width adds to sensitivity, contra v6 where width alone
+     did not).
+  H3 (composition): sccl_ens_strict_anchor.arith >= max(arith of rows
+     3..5) AND its ACC >= max(ACC of rows 3..5).
+  BREAKTHROUGH: sccl_ens_strict_anchor arith >= 0.55 AND
+     frontier >= sccl frontier (0.5) - 0.02 -> multi-seed (43/44)
+     confirmation BEFORE any headline claim.
+
+LADDER (configs/sccl_v7.json -> runs/sccl_v7, seeds 42..48 by index)
+  idx0 frozen              seed 42  determinism (must bit-match v6)
+  idx1 sccl                seed 43  determinism (must bit-match v6)
+  idx2 sccl_capprobe_strat seed 44  K=1, theta=0 (any-pass; must
+                                    bit-match v6 strat — control row)
+  idx3 sccl_strict         seed 45  K=1, theta=1.0, n=3 (E1 high dose)
+  idx4 sccl_majority       seed 46  K=1, theta=2/3, n=3 (E1 low dose)
+  idx5 sccl_ens_strict     seed 47  K=3, theta=1.0, n=3 (width+sensitivity)
+  idx6 sccl_ens_strict_anchor seed 48  K=3, theta=1.0, n=3, anchor
+                                    lambda=0.1 (full composition cell)
+  All rows share the v5b/v6 stream (hash 554ce43f182b, seed 42) and
+  sccl_replay_check=3 / sccl_replay_samples=2 for the skill stratum.
+  E1 rows set sccl_cap_samples=3 so the dose is measured over 3 draws
+  regardless of the skill-stratum sample count (no confound).
+
+DEGENERACY GUARD (pre-registered)
+  If a theta>0 row accepts < 3 updates across the whole stream, log it as
+  DEGENERATE (veto stall, not mechanism success): it is excluded from
+  H2/H3 max() comparisons and noted in the verdict. If the breakthrough
+  cell (idx6) is degenerate, BREAKTHROUGH = FAIL with a mechanism note.
+
+FAIL-CLOSED CHECKS (scripts/v7_check.py, auto-run by the watcher)
+  C1 determinism: rows idx0/idx1 bit-match runs/sccl_v6 rows on every
+     report metric; idx2 bit-matches v6 sccl_capprobe_strat. Any mismatch
+     -> abort interpretation (engine/config regression).
+  C2 engagement: every theta>0 row logs cap_rates on EVERY gate with
+     checked_cap>0; at least 50% of those gates show cap_rates for >= 1
+     probe. Missing cap_rates on a theta>0 gate -> abort (telemetry hole).
+  C3 dose sanity: on strict rows, cap_rates denominators are all n=3
+     (or n+cap_margin when the guard was armed — logged); theta field on
+     gate records equals the configured theta. Mismatch -> abort.
+  C4 isolation: frozen/sccl rows log checked_cap=0 and no cap_rates.
+  C5 gold-freedom: AST audit of gcl/vault.py + gcl/env.py gate path —
+     accept/reject consumes only probe regeneration results (no gold
+     labels, no holdout scores); gold remains telemetry/eval-only.
+     (Same audit as v6, extended to the new code path.)
+
+EXPECTED-RANGE SANITY (pre-run calibration, not pass/fail)
+  At temp 0.7 even a healthy probe has per-draw pass probability < 1 on
+  hard tasks, so strict rows will veto more; the guard arms and the
+  pooled-rate margin recheck is the designed relief valve. Expected dose
+  ordering of accepted-update counts: baseline > majority > strict.
+  Inversion of this ordering is itself a finding (record, don't abort).
+
+COST/SEQUENCING
+  7 rows x ~32 episodes; v6 wall-clock was ~7h for 7 rows on the 4060 Ti.
+  Smoke first: configs/_smoke_v7.json (2 episodes, theta rows only) must
+  show cap_rates present + bit-identical theta=0 trajectory vs v5b smoke.
+  Then full ladder, watcher runs v7_check.py on finalization.
+
+FALLBACK (pre-registered)
+  E1 fully fails (H1 FAIL at both doses, no dose-response in cap_rates)
+  -> E2 gold-free probe-gradient projection (A-GEM with the certified
+  probe pool as constraint set), per rule R3. E1 partially succeeds
+  (H1 PASS, H2/H3 FAIL) -> Branch F decision written after the verdict,
+  pre-registered before the next run.
