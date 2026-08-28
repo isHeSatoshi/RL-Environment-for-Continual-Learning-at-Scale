@@ -695,13 +695,13 @@ v6_check_watcher.sh will run scripts/v6_check.py (C1-C5 + H1/H2/H3/BREAKTHROUGH)
 when runs/sccl_v6/metrics.json finalizes. Gold-free throughout; gold only final
 eval + post-hoc telemetry.
 
-INTERIM (ladder in flight, 2026-08-28 ~06:00-09:00): first three determinism
+INTERIM (ladder in flight, 2026-08-28 ~06:00-09:00): ALL FOUR determinism
 rows reproduced runs/sccl_v5b BIT-FOR-BIT (frozen acc 0.6125 / frontier 0.5875;
 sccl acc 0.575 / frontier 0.5; sccl_capprobe acc 0.625 / frontier 0.4938 /
-9 updates / 10 rollbacks; every report key + per-family holdout identical).
-This confirms the
-pool=1 code path is a true no-op generalization on real 3B hardware, so any
-treatment-row difference is attributable to the ensemble/anchor alone.
+9 updates / 10 rollbacks; sccl_capprobe_strat acc 0.6938 / frontier 0.5625 /
+15 updates / 9 rollbacks / arith holdout 0.375; every report key + per-family
+holdout identical on all four). C1 is therefore satisfied ahead of the formal
+check; any treatment-row difference is attributable to the ensemble/anchor alone.
 Live mechanism signal from sccl_capprobe (K=1 control; trajectory steps):
 the cap stratum fired 4 cross/within-family vetoes over the stream —
   * step 0 (arith phase): update on mbpp_244 broke its own fresh probe
@@ -718,3 +718,31 @@ math_word-phase updates that eroded arith (gold telemetry cand 0.350/0.375)
 passed the 1-2 probes checked at the time — the unwitnessed-axis failure.
 The K=3 ensemble rows test whether more distinct-source probes per family
 close that residual gap.
+
+ENSEMBLE ROW RESULT (sccl_capens, seed 46, finalized in flight): H1 FAILS.
+acc 0.6500, frontier 0.525, arith holdout 0.200 (WORSE than K=1's 0.375),
+math 1.000 held, string 0.600->0.800, drift 0.800->0.600, 12 upd / 5 rb.
+The ensemble pool genuinely spanned 3 distinct arith axes (tuple-average
+mbpp_615, word-reverse mbpp_604, numeric mbpp_388). Gate trace (gold
+telemetry, measurement only):
+  * The ensemble ADDED true positives: mbpp_615:c0 vetoed 3 cross-family
+    damaging updates (math_word idx13, string idx20, drift idx25).
+  * Terminal blow: string-phase update mbpp_62 (idx16) dropped arith gold
+    0.40 -> 0.20 while passing ALL 5 checked probes incl. the numeric-axis
+    probe mbpp_388:c0. Probe insensitivity persists at K=3.
+  * In-phase erosion also passed early (idx0 mbpp_244: 0.6->0.4, chk=1,
+    pool still forming; idx4 mbpp_615 itself: 0.6->0.4).
+  * cap_guard armed at 3 gates (more probes -> more breaks -> guard margin
+    re-checks); 2 of the 3 armed gates accepted; none of the armed accepts
+    caused measured arith erosion, so the guard is not indicted here.
+Refined mechanism (M1'): the binding constraint is NOT witness COUNT but
+witness SENSITIVITY. Single-instance probes are point witnesses; holdout
+damage moves in directions orthogonal to every witnessed spec. Widening the
+witness set 1->3 distinct axes raised cross-family true-positive vetoes
+(0->3) yet left the terminal damage path unwitnessed, and seed-46 in-phase
+erosion (absent in seed-45) made the endpoint worse. Prediction for the
+anchor rows: the quadratic pull is the only mechanism here that acts on the
+weights themselves, hence the only candidate to protect unwitnessed axes;
+if H2/H3 also fail, Branch E must convert the gate's discrete pass/fail
+evidence into a continuous constraint (margin-tracked probes and/or
+probe-loss-projected gradients) rather than adding more point witnesses.
