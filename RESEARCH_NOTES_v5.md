@@ -1304,3 +1304,106 @@ FALLBACK TRIGGERED (pre-registered): M1 < 50% and breakthrough unconfirmed
   rotation, KEEP the anchor (the only composition that dominates), and a
   mandatory 3-seed protocol from the start (no seed-42 gate before
   multi-seed — the v8 lesson). Pre-registered below as BRANCH G (V9).
+
+================================================================================
+BRANCH G PRE-REGISTRATION (V9 DOSE LADDER) — written 2026-08-30, BEFORE any
+v9 implementation or run. Triggered by the pre-registered v8 fallback (M1 < 50%
+and breakthrough unconfirmed at 3 seeds). Design is fixed on v8's ALREADY
+COLLECTED evidence; nothing below may be changed after the first v9 row starts.
+================================================================================
+
+EVIDENCE BASE (v8, 3 seeds, all recorded):
+  - The composition (gen witnesses G=1 + theta=1.0 n=3 + anchor 0.1) DOMINATES
+    sccl at every seed on arith (paired +.200/+.000/+.400) and frontier (mean
+    +.625 +/- .022) but is plasticity-fragile: accepted updates 14/4/6 — on
+    s43/s44 the theta=1.0 dose vetoes nearly everything (the v7-F6 trade under
+    seed variance).
+  - M1 = 0% at every seed: the gate never CATCHES an erosion; protection is
+    update selection (accepted updates stay in the certified+witnessed basin).
+  - Therefore the breakthrough bar (arith >= .55 paired per seed) fails not
+    for lack of protection but for lack of ACCEPTED UPDATES at the strict dose.
+
+V9 QUESTION (single-variable dose scaling on the v8 composition):
+  does a SOFTER rate threshold over the SAME composition restore plasticity
+  (>= 8 updates/seed) while KEEPING the dominance (arith >= sccl paired,
+  every seed) and reaching the breakthrough bar at all 3 seeds?
+
+TWO TREATMENT ROWS (only the dose theta varies; everything else fixed):
+  sccl_gen2_half      : G=2 gen lane, theta=0.5,  n=3 margin 2, stratified,
+                        cap probes on, anchor lambda=0.1.
+  sccl_gen2_majority  : G=2 gen lane, theta=2/3,  n=3 margin 2, stratified,
+                        cap probes on, anchor lambda=0.1.
+  G=2 = TWO concurrent generalization witnesses per family (dedicated ':g'
+  lane holds the 2 newest untrained-source witnesses; retired before their
+  source trains; refreshed from the next untrained task; both may enter the
+  per-gate probe draw). Rationale: v8's single witness per family covered one
+  point of the generalization axis; two concurrent witnesses double the
+  covered subspace at the SAME certification cost per family, and the soft
+  threshold keeps their veto from stalling plasticity.
+  theta=0.5: pooled rate >= 1.5/3 (>=2 of 3 draws). theta=2/3: pooled >= 2/3
+  (>=2 of 3 draws, but stricter after the n=5 margin recheck: >=3 vs >=4 of 5).
+
+PREFIX CONTROL ROWS (C1 determinism): frozen, sccl, sccl_capprobe,
+  sccl_capprobe_strat — bit-identical to runs/sccl_v8 prefix rows at seed 42
+  and to runs/sccl_v8_s{43,44} prefix rows at seeds 43/44 (same stream hash,
+  same per-learner seeds; verified per seed by scripts/v9_check.py).
+
+PROTOCOL (methodological lesson of v8 — the seed-42 gate is NOT sufficient):
+  1. wiring smoke (configs/_smoke_v9.json, 2 families, both rows + control):
+     fail-closed engagement audit (first-contact manufacture of TWO ':g'
+     probes per family, both lanes in gates, retirement/anti-contamination
+     walk, dose fields theta/cap_n/denominators, anchor engagement, control
+     isolation, holdout disjointness).
+  2. THE 3-SEED LADDER IS THE EXPERIMENT: run seeds 42,43,44 sequentially on
+     configs/sccl_v9.json (scripts/run_seeds.py). No interim decision, no
+     early stop, no seed-42-only gate. Verdict computed once, after all
+     three seeds finalize, from runs/sccl_v9{,_s43,_s44}/metrics.json.
+
+DECISION RULES (pre-registered; computed per seed s in {42,43,44}):
+  H1 (plasticity restored): every treatment row accepts >= 8 updates at seed
+     s. (v8 theta=1.0 accepted 14/4/6; the soft dose must clear 8 at every
+     seed or the dose is still too harsh.)
+  H2 (dominance kept): for every treatment row, arith >= sccl.arith at seed
+     s (paired; the v8 composition held this at every seed).
+  H3 (breakthrough): SOME treatment row has arith >= 0.55 AND frontier >=
+     sccl.frontier - 0.02 AND updates >= 5 at seed s.
+  V9 VERDICT:
+    BREAKTHROUGH CONFIRMED iff H3 holds at ALL 3 seeds (the v8 bar, now
+      evaluated up front at all seeds).
+    DOMINANCE CONFIRMED iff H2 holds at all 3 seeds (replicates v8's honest
+      positive).
+    If H1 FAILS at any seed (a row accepts < 8): dose still too harsh ->
+      record as dose finding; theta ladder exhausted -> next branch moves
+      the strictness off the RATE axis entirely (witness-free drift bounds,
+      e.g. certified-manifold trust region; pre-register before running).
+    If H1 PASSES but H3 FAILS: the theta axis is exhausted too -> same next
+      branch. A theta between 0.5 and 1.0 will NOT be run (protocol stops at
+      the pre-registered dose pair; chasing the interpolated theta would be
+      garden-of-forking-paths).
+  M1 telemetry (measurement only, not gated) continues per row per seed.
+
+DEGENERACY GUARD: a treatment row with < 5 accepted updates at any seed is
+  DEGENERATE at that seed (excluded from H3 maxima; forces H3 FAIL there).
+
+FAIL-CLOSED CHECKS (per seed; scripts/v9_check.py, fail -> abort, no verdict):
+  C1 determinism: the 4 prefix rows bit-identical to the matching v8 run
+     (seed 42 vs runs/sccl_v8; 43/44 vs runs/sccl_v8_s{43,44}) on report
+     keys + frontier + family holdout scores.
+  C2 engagement: first-contact markers >= 1 per row; ':g' ids in
+     checked_cap_ids on >= 1 gate; with G=2 the vault's gen lane holds 2
+     ':g' probes per family at run end UNLESS the family exhausted untrained
+     sources (logged); theta rows log cap_rates on every checked-cap gate
+     with cap_retain_min == {0.5 | 2/3}, cap_n == 3, denominators in {3,5};
+     sccl_stats gen counters committed >= 4 (2 per family) per row.
+  C3 retirement/anti-contamination: no ':g' from task T checked during or
+     after T's own training episode; every ':g' source is a stream TRAIN task
+     disjoint from eval holdout ids (metrics eval_detail.final_heldout).
+  C4 isolation: prefix rows show zero gen/E1/anchor activity; treatment
+     rows log anchor_pen > 0 on every accepted update with lambda == {0.1}.
+  C5 gold-free: the v8 three-layer audit (selfcert.py global; _gen_make vs
+     LABEL_FIELDS + entry_point under sccl_derive_entry=true; vault SCCL
+     methods Task-free + Task-gold readers confined to legacy VSR set +
+     zero vsr-method/gold-target records in run data).
+
+COST: 6 rows x 3 seeds; v8 measured ~45 min/row -> ~13.5h total, sequential.
+  runs/sccl_v9{,_s43,_s44} + aggregate runs/sccl_v9_seeds. NEVER committed.
