@@ -1271,3 +1271,36 @@ V8 MULTI-SEED (pre-registration: BREAKTHROUGH PASS requires seeds 43/44):
   ladders at torch_seed 43/44 + 3-seed aggregate). Verdict PENDING; the
   headline is claimable only if the paired per-seed rule (arith >= .55
   AND frontier >= sccl-.02 AND updates >= 5) holds on all three seeds.
+
+V8 MULTI-SEED FINAL VERDICT (2026-08-30, runs/sccl_v8_s{42,43,44},
+  aggregate in runs/sccl_v8_seeds/):
+  PAIRED BREAKTHROUGH RULE: met on 2/3 seeds -> NOT CONFIRMED at the
+  pre-registered bar (the rule demands all three; s43 fails it).
+  Per-seed arith (breakthrough cell vs sccl):
+    s42 anchor .600 vs sccl .400 | s43 anchor .400 vs sccl .400 (updates 4)
+    | s44 anchor .600 vs sccl .200 (updates 6).
+  Mean arith: anchor .533+/- .115 vs sccl .333 +/- .115 — paired advantage
+  +.200/+.000/+.400 (mean +.200, never negative; every anchor seed >= sccl
+  max). Mean frontier: anchor +.625 +/- .022 (the tightest row in the
+  table) vs sccl +.504 +/- .106 — anchor >= sccl on every seed.
+  HONEST HEADLINE: the witness+anchor composition DOMINATES the gold-free
+  baseline at 3 seeds (arith mean +0.200, frontier +0.121, both
+  seed-consistent), but the strict breakthrough bar (arith >= .55 AND
+  frontier >= sccl-.02 AND updates >= 5, paired per seed) failed on s43
+  where the strict gate stalled plasticity: 4 accepted updates (12
+  rollbacks). Updates across seeds 14/4/6 — the dose is plasticity-
+  fragile, echoing v7-F6.
+  Mechanism cross-seed (telemetry_v8.json per seed): M1 = 0% at every
+  seed (0/3, 0/1, plus s44) — gen witnesses never fire on gold-erosion
+  gates. On s44 the no-anchor strict row accepted 2 updates and keeps
+  frozen-level arith .600 — the v7-F7 "no-damage envelope" again; its
+  apparent arith win there is the stall, not protection.
+  CONCLUSION: sensitivity-via-composition (strict witnesses + anchor)
+  is seed-robust as a DOMINANCE result, not yet a >=.55-everywhere
+  breakthrough. The binding constraint is the DOSE (theta=1.0, G=1, n=3
+  vetoes too much under seed variance).
+FALLBACK TRIGGERED (pre-registered): M1 < 50% and breakthrough unconfirmed
+  -> v9 dose scaling: theta in {0.5, 2/3} on the joint pool, G=2 with lane
+  rotation, KEEP the anchor (the only composition that dominates), and a
+  mandatory 3-seed protocol from the start (no seed-42 gate before
+  multi-seed — the v8 lesson). Pre-registered below as BRANCH G (V9).
