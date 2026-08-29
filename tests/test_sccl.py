@@ -2218,3 +2218,161 @@ def test_v8_env_wiring_logs_gen_lane_and_checked_ids():
     g2 = s2["update_info"]["gate"]
     assert "cap_gen_pool" not in g2 and "checked_cap_ids" not in g2, \
         "non-gen gate records must keep the pre-v8 shape"
+
+
+# ---- SCCL v9 (Branch G, G2 dose scaling) tests --------------------------------
+
+def test_v9_learners_registered():
+    """Both Branch G treatment rows exist under their config names."""
+    from gcl.learners.learners import LEARNERS, SCCLLearner
+    assert LEARNERS["sccl_gen2_half"].name == "sccl_gen2_half"
+    assert LEARNERS["sccl_gen2_majority"].name == "sccl_gen2_majority"
+    assert issubclass(LEARNERS["sccl_gen2_half"], SCCLLearner)
+    assert issubclass(LEARNERS["sccl_gen2_majority"], SCCLLearner)
+
+
+def test_v9_default_config_is_inert():
+    """Off-by-default guarantee + the v9 config pins the pre-registered
+    dose exactly (G=2 lane, theta {0.5, 2/3}, n=3, anchor 0.1, ladder)."""
+    import json
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    assert cfg.sccl_genprobes == 0
+    assert cfg.sccl_genprobe_learners == []
+    assert cfg.sccl_cap_retain_mins == {}
+    assert cfg.sccl_cap_samples_map == {}
+    v9 = json.load(open(os.path.join(os.path.dirname(__file__), "..",
+                                     "configs", "sccl_v9.json")))
+    e = v9["experiment"]
+    assert e["sccl_genprobes"] == 2
+    assert e["sccl_genprobe_learners"] == ["sccl_gen2_half",
+                                           "sccl_gen2_majority"]
+    assert abs(e["sccl_cap_retain_mins"]["sccl_gen2_half"] - 0.5) < 1e-9
+    assert abs(e["sccl_cap_retain_mins"]["sccl_gen2_majority"] - 2 / 3) < 1e-9
+    assert e["sccl_cap_samples_map"] == {"sccl_gen2_half": 3,
+                                         "sccl_gen2_majority": 3}
+    assert e["sccl_anchor_lambdas"] == {"sccl_gen2_half": 0.1,
+                                        "sccl_gen2_majority": 0.1}
+    assert v9["learners"] == ["frozen", "sccl", "sccl_capprobe",
+                              "sccl_capprobe_strat", "sccl_gen2_half",
+                              "sccl_gen2_majority"]
+
+
+def test_cap_pool_two_gen_lane_holds_two_witnesses():
+    """G=2: the dedicated ':g' lane holds the TWO newest gen witnesses per
+    family and certified commits never evict either."""
+    v = SelfCertVault()
+    assert v.commit_cap_probe("A:c0", "famA", "spec A", "PROMPT MA\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=2)
+    for tid in ("g1:g", "g2:g", "g3:g"):
+        assert v.commit_cap_probe(tid, "famA", "spec " + tid,
+                                  "PROMPT " + tid + "\n```python\n",
+                                  _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                                  pool=1, gen_pool=2)
+    pool = v._cap_pool_by_family(1, gen_pool=2)["famA"]
+    assert [s.task_id for s in pool] == ["A:c0", "g2:g", "g3:g"], \
+        "certified lane first, then the two NEWEST gen witnesses"
+    # a newer certified skill replaces the older one; the gen lane is untouched
+    assert v.commit_cap_probe("B:c0", "famA", "spec B", "PROMPT MB\n```python\n",
+                              _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                              pool=1, gen_pool=2)
+    pool = v._cap_pool_by_family(1, gen_pool=2)["famA"]
+    assert [s.task_id for s in pool] == ["B:c0", "g2:g", "g3:g"]
+
+
+def test_rrv_two_gen_probes_checked_and_theta_half_retains():
+    """Both ':g' witnesses enter the gate draw at G=2; at the theta=0.5 dose
+    a witness regenerating 2-of-3 passes is RETAINED (pooled 0.667 >= 0.5)
+    — the plasticity relief the soft dose exists to provide."""
+    v = SelfCertVault()
+    v.commit_cap_probe("A:c0", "famA", "spec A", "PROMPT MA\n```python\n",
+                       _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                       pool=1, gen_pool=2)
+    v.commit_cap_probe("ga:g", "famA", "spec ga", "PROMPT GA\n```python\n",
+                       _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                       pool=1, gen_pool=2)
+    v.commit_cap_probe("gb:g", "famA", "spec gb", "PROMPT GB\n```python\n",
+                       _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                       pool=1, gen_pool=2)
+
+    ver = Verifier(sandbox=PythonSandbox())
+    eng = _RateEngine([_GOOD_CODE, _BAD_CODE, _GOOD_CODE])  # 2-of-3 pattern
+    out = v.selfreplay_veto(eng, ver, check_skills=0,
+                           n_samples=3, check_cap_probes=4,
+                           cap_pool=1, cap_gen_pool=2,
+                           cap_retain_min=0.5, cap_samples=3, cap_margin=0)
+    gids = sorted(i for i in out.get("checked_cap_ids", []) if i.endswith(":g"))
+    assert gids == ["ga:g", "gb:g"], out
+    # 2-of-3 pooled per gen probe == 0.6667 >= 0.5 -> retained: no veto
+    assert out["veto"] is False and out["broke_cap"] == [], out
+    rates = out.get("cap_rates", {})
+    assert all(r["passes"] == 2 and r["n"] == 3
+               for k, r in rates.items() if k.endswith(":g")), rates
+    assert set(out.get("checked_cap_ids", [])) == {"A:c0", "ga:g", "gb:g"}, out
+
+
+def test_rrv_theta_half_vetoes_on_one_of_three():
+    """theta=0.5 still vetoes a gen witness that passes only 1 of 3 draws
+    (pooled 0.333 < 0.5): the soft dose catches collapse."""
+    v = SelfCertVault()
+    v.commit_cap_probe("ga:g", "famA", "spec ga", "PROMPT GA\n```python\n",
+                       _CAP_CODE, _CAP_TESTS_VARIANT, 0.9,
+                       pool=1, gen_pool=2)
+
+    class _BadEngine:  # regenerations fail the probe tests
+        def sample_candidates(self, prompt, n=1, temperature=0.7):
+            return ["WRONG1", "WRONG2", "WRONG3"][:n]
+
+    out = v.selfreplay_veto(_BadEngine(), None, check_skills=0,
+                            n_samples=3, check_cap_probes=2,
+                            cap_pool=1, cap_gen_pool=2,
+                            cap_retain_min=0.5, cap_samples=3, cap_margin=2)
+    assert out["veto"] is True and "ga:g" in out["broke_cap"], out
+
+
+def test_v9_env_wiring_two_gen_ids_and_dose():
+    """Env-level v9 wiring: a G=2 row's gate record persists cap_gen_pool=2
+    with BOTH ':g' ids in checked_cap_ids, and the theta=2/3 dose fields
+    (cap_retain_min, cap_n) reach the gate record for audit."""
+    from gcl.curriculum import Family
+    cfg = ExperimentConfig(out_dir="runs/_test_sccl")
+    cfg._learner_name = "sccl_gen2_majority"
+    cfg.sccl_learners = ["sccl_gen2_majority"]
+    cfg.sccl_nogate_learners = []
+    cfg.sccl_gate_probe = 0
+    cfg.sccl_capprobe_learners = ["sccl_gen2_majority"]
+    cfg.sccl_capprobe_check = 4
+    cfg.sccl_genprobe_learners = ["sccl_gen2_majority"]
+    cfg.sccl_genprobes = 2
+    cfg.sccl_cap_retain_mins = {"sccl_gen2_majority": 2 / 3}
+    cfg.sccl_cap_samples_map = {"sccl_gen2_majority": 3}
+    cfg.sccl_capprobe_margin = 2
+    eng = FakeEngine(cfg, regen_passes=True)
+    ver = Verifier(sandbox=PythonSandbox())
+    vault = SelfCertVault()
+    t1 = _poisoned_task()
+    t2 = Task(task_id="t_v9_ok", family="fam", domain="code",
+              prompt="Return the sum of two integers a and b.",
+              test_code="assert add2(2, 2) == 4",
+              reference_answer="def add2(a, b):\n    return 4",
+              entry_point="add2")
+    env = GroundedContinualEnv(cfg, eng, ver,
+                               [Family(name="fam", tasks=[t1, t2], holdout=[])],
+                               holdout=[], vault=vault, sccl=True)
+    vault.commit_cap_probe("seed:c0", "fam", "variant spec",
+                           "PROMPT v\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9)
+    vault.commit_cap_probe("s1:g", "fam", "untrained spec 1",
+                           "PROMPT g1\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9, pool=1, gen_pool=2)
+    vault.commit_cap_probe("s2:g", "fam", "untrained spec 2",
+                           "PROMPT g2\n```python\n", _CAP_CODE,
+                           _CAP_TESTS_VARIANT, 0.9, pool=1, gen_pool=2)
+    _, _, _, s1 = env.step(Action(answer=_CERT_CODE, learn_op=LearnOp.UPDATE_LORA,
+                                  metadata={"sccl": _cert_meta(found=True)}))
+    g = s1["update_info"]["gate"]
+    assert g.get("cap_gen_pool") == 2, g
+    assert [i for i in g.get("checked_cap_ids", [])
+            if i.endswith(":g")] == ["s1:g", "s2:g"], g
+    assert abs(g.get("cap_retain_min", -1) - 2 / 3) < 1e-9, g
+    assert g.get("cap_n") == 3, g

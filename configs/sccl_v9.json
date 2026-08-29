@@ -1,0 +1,145 @@
+{
+  "_comment": "SCCL v9 (Branch G of RESEARCH_NOTES_v5.md, 'BRANCH G PRE-REGISTRATION (V9 DOSE LADDER)', written and committed ad7172d BEFORE any v9 implementation or run). Single-variable dose scaling on the v8 composition: the 3-seed v8 verdict showed the gen-witness + theta=1.0 + anchor composition DOMINATES sccl at every seed (paired arith +.200/+.000/+.400, frontier mean +.625+/-0.022) but is plasticity-fragile (accepted updates 14/4/6; on s43/s44 theta=1.0 vetoes nearly everything) and M1=0% at every seed (protection is update selection, not gate-level erosion detection). V9 tests whether a SOFTER rate threshold over a WIDER witness lane restores plasticity while keeping dominance: G=2 concurrent generalization witnesses per family (dedicated ':g' lane, manufactured at first contact from UNTRAINED stream tasks via the gold-free spec-only certify, retired before their source trains, refreshed from the next untrained task) under theta in {0.5, 2/3} with n=3 draws, margin recheck denominators {3,5}, stratified, cap probes on, anchor lambda=0.1 kept. LADDER (seed = torch_seed + learner index; idx0..idx3 are the exact v5b/v6/v7/v8 determinism prefix and must bit-match runs/sccl_v8 idx0..idx3): 0 frozen, 1 sccl, 2 sccl_capprobe (K=1, theta=0), 3 sccl_capprobe_strat, 4 sccl_gen2_half (G=2, theta=0.5, anchor 0.1), 5 sccl_gen2_majority (G=2, theta=2/3, anchor 0.1). PROTOCOL (v8 lesson): the 3-seed ladder IS the experiment \u2014 seeds 42,43,44 via scripts/run_seeds.py, no interim decision, no seed-42-only gate. PRE-REGISTERED RULES (per seed s): H1 plasticity restored (every treatment row >= 8 accepted updates at s; v8 theta=1.0 gave 14/4/6); H2 dominance kept (every treatment row arith >= sccl.arith at s, paired); H3 breakthrough (some treatment row arith >= 0.55 AND frontier >= sccl.frontier - 0.02 AND updates >= 5 at s). V9 VERDICT: BREAKTHROUGH CONFIRMED iff H3 at all 3 seeds; DOMINANCE CONFIRMED iff H2 at all 3 seeds; H1 FAIL at any seed -> dose finding (theta axis exhausted -> next branch pre- registers a witness-free drift bound); H1 PASS with H3 FAIL -> theta axis exhausted likewise; NO interpolated theta will be run. DEGENERACY GUARD: treatment row < 5 updates at any seed = degenerate there (excluded from H3 maxima, forces H3 FAIL there). FAIL-CLOSED per-seed checks in scripts/v9_check.py: C1 prefix bit-identity vs runs/sccl_v8 (s42) and runs/sccl_v8_s{43,44} (s43/s44); C2 engagement (first-contact manufacture of TWO ':g' probes per family, ':g' in checked_cap_ids, cap_retain_min == {0.5 | 0.666667}, cap_n == 3, denominators {3,5}, gen counters committed >= 4/row); C3 retirement/anti-contamination (no ':g' from T checked during/after T's training; ':g' sources disjoint from eval holdout ids); C4 isolation (prefix rows zero gen/E1/anchor activity; treatment rows anchor_pen>0 on every accepted update, lambda == 0.1); C5 gold-free 3-layer audit (as v8). Same stream hash 554ce43f182b, torch_seed=42, gold-free throughout (gold only final eval + post-hoc telemetry).",
+  "stream": {
+    "seed": 42,
+    "families": [
+      {
+        "corpus": "mbpp",
+        "name": "arith",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "math",
+        "name": "math_word",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 0
+      },
+      {
+        "corpus": "mbpp",
+        "name": "string",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 12
+      },
+      {
+        "corpus": "mbpp",
+        "name": "drift",
+        "n_train": 8,
+        "n_holdout": 4,
+        "offset": 24,
+        "drift": {
+          "kind": "spec_perturb"
+        }
+      }
+    ]
+  },
+  "experiment": {
+    "model_name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "learning_rate": 0.0003,
+    "train_steps_per_update": 4,
+    "max_updates": 60,
+    "temperature": 0.1,
+    "max_new_tokens": 256,
+    "gate_epsilon": 0.05,
+    "holdout_size": 8,
+    "use_vsr_gate": true,
+    "use_reference_injection": true,
+    "vsr_learners": [
+      "vsr"
+    ],
+    "refinject_learners": [
+      "vsr"
+    ],
+    "vault_commit_min": 0.9,
+    "vault_retrieve_k": 3,
+    "vault_gate_check": 3,
+    "sccl_learners": [
+      "sccl",
+      "sccl_capprobe",
+      "sccl_capprobe_strat",
+      "sccl_gen2_half",
+      "sccl_gen2_majority"
+    ],
+    "sccl_nogate_learners": [],
+    "sccl_nocons_learners": [],
+    "sccl_k": 6,
+    "sccl_temp": 0.8,
+    "sccl_test_bags": 2,
+    "sccl_tests_per_bag": 4,
+    "sccl_tau": 0.65,
+    "sccl_tau_math": 0.6,
+    "sccl_derive_entry": true,
+    "sccl_replay_check": 3,
+    "sccl_replay_samples": 2,
+    "sccl_gate_probe": 4,
+    "sccl_replay_learners": [],
+    "sccl_replay_k": 0,
+    "sccl_probe_learners": [],
+    "sccl_probes": 0,
+    "sccl_probe_check": 0,
+    "sccl_rrv_math": 0,
+    "sccl_probe_promote_learners": [],
+    "sccl_probe_promote_age": 0,
+    "sccl_nbhd_learners": [],
+    "sccl_nbhd_tests": 0,
+    "sccl_anchor_learners": [
+      "sccl_gen2_half",
+      "sccl_gen2_majority"
+    ],
+    "sccl_anchor_lambda": 0.0,
+    "sccl_anchor_lambdas": {
+      "sccl_gen2_half": 0.1,
+      "sccl_gen2_majority": 0.1
+    },
+    "sccl_stratified_learners": [
+      "sccl_capprobe_strat",
+      "sccl_gen2_half",
+      "sccl_gen2_majority"
+    ],
+    "sccl_capprobe_learners": [
+      "sccl_capprobe",
+      "sccl_capprobe_strat",
+      "sccl_gen2_half",
+      "sccl_gen2_majority"
+    ],
+    "sccl_capprobes": 1,
+    "sccl_capprobe_check": 4,
+    "sccl_capprobe_budget": 0.5,
+    "sccl_capprobe_margin": 2,
+    "sccl_capprobe_pool": 1,
+    "sccl_capprobe_pools": {},
+    "sccl_cap_retain_min": 0.0,
+    "sccl_cap_retain_mins": {
+      "sccl_gen2_half": 0.5,
+      "sccl_gen2_majority": 0.6666666666666666
+    },
+    "sccl_cap_samples": 0,
+    "sccl_cap_samples_map": {
+      "sccl_gen2_half": 3,
+      "sccl_gen2_majority": 3
+    },
+    "sccl_genprobe_learners": [
+      "sccl_gen2_half",
+      "sccl_gen2_majority"
+    ],
+    "sccl_genprobes": 2,
+    "self_taught_learners": [],
+    "out_dir": "runs/sccl_v9",
+    "seed": 42,
+    "torch_seed": 42
+  },
+  "learners": [
+    "frozen",
+    "sccl",
+    "sccl_capprobe",
+    "sccl_capprobe_strat",
+    "sccl_gen2_half",
+    "sccl_gen2_majority"
+  ],
+  "out_dir": "runs/sccl_v9"
+}

@@ -507,6 +507,29 @@ class SCCLGenProbeStrictAnchorLearner(SCCLLearner):
     name = "sccl_genprobe_strict_anchor"
 
 
+class SCCLGen2HalfLearner(SCCLLearner):
+    """SCCL v9 (Branch G) soft-dose row: the v8 composition with the rate
+    threshold SCALED DOWN and the witness lane SCALED UP — G=2 concurrent
+    generalization witnesses per family (dedicated ':g' lane, retired before
+    their source trains, refreshed from the next untrained task) under
+    theta=0.5 (pooled rate >= 1.5/3; n=3 draws, margin recheck +2), with the
+    in-update base anchor lambda=0.1 kept. v8's 3-seed evidence: the
+    theta=1.0 composition dominates sccl at every seed but is plasticity-
+    fragile (accepted updates 14/4/6) — the soft dose tests whether the
+    dominance survives while >= 8 updates/seed are accepted (pre-registered
+    H1). Fully gold-free."""
+    name = "sccl_gen2_half"
+
+
+class SCCLGen2MajorityLearner(SCCLLearner):
+    """SCCL v9 (Branch G) medium-dose row: identical to sccl_gen2_half
+    except theta=2/3 (pooled rate >= 2/3 — the v7 majority dose), G=2
+    gen-witness lane, n=3 margin recheck, stratified, anchor lambda=0.1.
+    Pre-registered as one of exactly two dose points; no interpolation
+    between them will be run. Fully gold-free."""
+    name = "sccl_gen2_majority"
+
+
 LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefLearner,
                                  ReplayLearner, EWCLearner, ControllerLearner,
                                  VSRLearner, VSRBoundedLearner, VSRSelfLearner, GRPOLearner,
@@ -522,5 +545,6 @@ LEARNERS = {c.name: c for c in (FrozenLearner, AlwaysLoRALearner, AlwaysLoRARefL
                                  SCCLStrictLearner, SCCLMajorityLearner,
                                  SCCLEnsStrictLearner, SCCLEnsStrictAnchorLearner,
                                  SCCLGenProbeLearner, SCCLGenProbeStrictLearner,
-                                 SCCLGenProbeStrictAnchorLearner)}
+                                 SCCLGenProbeStrictAnchorLearner,
+                                 SCCLGen2HalfLearner, SCCLGen2MajorityLearner)}
 LEARNERS["vsr_nogold"] = VSRNoGold

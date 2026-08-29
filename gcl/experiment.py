@@ -208,9 +208,11 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         # untrained task; RETIRE a gen probe before its source task trains;
         # REFRESH from the following untrained task. gen_state per family:
         # tasks (stream order), next_i (next candidate index), live (source
-        # task_id of the currently live witness or None). Off unless listed
-        # in cfg.sccl_genprobe_learners with sccl_genprobes > 0, so all
-        # pre-v8 rows stay bit-identical.
+        # task_ids of the currently live witnesses — a LIST of up to
+        # G = cfg.sccl_genprobes concurrent witnesses per family; v9 Branch G
+        # scales G, v8 ran G=1). Off unless listed in
+        # cfg.sccl_genprobe_learners with sccl_genprobes > 0, so all pre-v8
+        # rows stay bit-identical.
         gen_on = (is_sccl and vault is not None
                   and name in set(getattr(cfg, "sccl_genprobe_learners", []))
                   and int(getattr(cfg, "sccl_genprobes", 0)) > 0)
@@ -221,13 +223,13 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
         gen_last_family = None
 
         def _gen_make(family_name: str) -> bool:
-            """G1: manufacture one generalization witness for `family_name`
-            from the next UNTRAINED stream task. Spec-only: certify sees the
-            candidate task's prompt/domain (+ derived entry) and nothing
-            else — no gold test_code, no reference answer, no holdout task.
-            Walks candidates until one certifies (found + usable self-tests)
-            or the family's untrained tasks are exhausted. Returns True iff
-            a witness was committed."""
+            """G1/G2: manufacture generalization witnesses for `family_name`
+            from UNTRAINED stream tasks until G live witnesses exist. Spec-
+            only: certify sees the candidate task's prompt/domain (+ derived
+            entry) and nothing else — no gold test_code, no reference answer,
+            no holdout task. Walks candidates until the lane is full or the
+            family's untrained tasks are exhausted. Returns True iff at
+            least one NEW witness was committed this call."""
             st = gen_state.get(family_name)
             if st is None:
                 return False
@@ -235,7 +237,8 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
             _cpools = getattr(cfg, "sccl_capprobe_pools", {}) or {}
             _cpool = int(_cpools.get(
                 name, getattr(cfg, "sccl_capprobe_pool", 1)))
-            while st["live"] is None and st["next_i"] < len(st["tasks"]):
+            made = False
+            while len(st["live"]) < G and st["next_i"] < len(st["tasks"]):
                 t = st["tasks"][st["next_i"]]
                 st["next_i"] += 1
                 cert_entry = (None if getattr(cfg, "sccl_derive_entry", True)
@@ -260,9 +263,9 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                     pool=_cpool, gen_pool=G)
                 sccl_stats["gen_probes_committed"] += int(bool(committed))
                 if committed:
-                    st["live"] = t.task_id
-                    return True
-            return False
+                    st["live"].append(t.task_id)
+                    made = True
+            return made
         t0 = time.time()
         obs = env.reset()
         last_family_seen = 0
@@ -423,16 +426,17 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                         gen_state[task.family] = {
                             "tasks": list(env._family().tasks),
                             "next_i": env.task_idx + 1,
-                            "live": None}
+                            "live": []}
                         if _gen_make(task.family):
                             meta_extra["sccl_gen_probe"] = {
                                 "first_contact": task.family,
-                                "src": gen_state[task.family]["live"]}
+                                "src": list(gen_state[task.family]["live"])}
                     _gs = gen_state.get(task.family)
-                    if _gs is not None and _gs["live"] == task.task_id:
+                    if _gs is not None and task.task_id in _gs["live"]:
                         if vault.retire_cap_probe(task.task_id + ":g"):
                             sccl_stats["gen_probes_retired"] += 1
-                        _gs["live"] = None
+                        _gs["live"] = [x for x in _gs["live"]
+                                       if x != task.task_id]
                         _gen_retired = True
                 op = learner.decide(obs, None, False)
                 obs2, reward, done, info = env.step(Action(
@@ -445,9 +449,9 @@ def run_experiment(cfg: ExperimentConfig, learner_names: List[str],
                 rewards.append(reward)
                 ui = info["update_info"]
                 if gen_on and _gen_retired:
-                    # G1 REFRESH: the retired witness's source task is now
+                    # G1/G2 REFRESH: the retired witness's source task is now
                     # trained; manufacture the replacement from the next
-                    # UNTRAINED task so the family stays witnessed.
+                    # UNTRAINED task so the lane stays at G live witnesses.
                     _gen_make(task.family)
                 vsr = info.get("vsr", {})
                 if vsr:
