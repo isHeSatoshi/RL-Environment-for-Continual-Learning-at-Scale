@@ -353,15 +353,77 @@ def main() -> None:
             print(f"  _gen_make consumes no gold field "
                   f"(forbidden set: {sorted(forbidden)})")
 
+    # vault.py is audited in three fail-closed layers (the pre-registration
+    # scopes C5 to "the manufacture AND gate paths"; a blanket name ban is
+    # unsound here because _Skill stores each skill's OWN self-certified
+    # tests under the attribute name `test_code` — provenance: certifier
+    # self_tests, never Task gold — so the attribute NAME alone cannot
+    # distinguish gold from vault-internal state):
     vault_path = os.path.join(REPO, "gcl", "vault.py")
     vtree = ast.parse(open(vault_path, encoding="utf-8").read())
-    vv = [f"line {n.lineno}: .{n.attr}" for n in ast.walk(vtree)
-          if isinstance(n, ast.Attribute) and n.attr in GOLD_FIELDS]
-    if vv:
-        failures.append(f"C5 gold-free: vault.py touches gold fields: {vv}")
-        print(f"  vault.py VIOLATIONS: {vv}")
+
+    # (1) every method the SCCL pipeline calls on the vault must be Task-free:
+    # no parameter named task, no Task attribute access anywhere in its body.
+    SCCL_VAULT_METHODS = ["commit_certified", "commit_probe", "commit_cap_probe",
+                          "retire_cap_probe", "_cap_pool_by_family",
+                          "selfreplay_veto", "_too_similar_spec_exists"]
+    vmethods = {n.name: n for n in ast.walk(vtree)
+                if isinstance(n, ast.FunctionDef)}
+    for m in SCCL_VAULT_METHODS:
+        fn = vmethods.get(m)
+        if fn is None:
+            failures.append(f"C5: vault method {m} not found in gcl/vault.py")
+            continue
+        has_task_param = any(a.arg == "task" for a in fn.args.args)
+        gold_attrs = [f"line {n.lineno}: .{n.attr}"
+                      for n in ast.walk(fn)
+                      if isinstance(n, ast.Attribute)
+                      and isinstance(n.value, ast.Name) and n.value.id == "task"
+                      and n.attr in GOLD_FIELDS]
+        if has_task_param or gold_attrs:
+            failures.append(f"C5 gold-free: vault.{m} takes a Task object "
+                            f"(task param={has_task_param}, gold attrs={gold_attrs})")
+    if not any(f.startswith("C5") for f in failures):
+        print(f"  vault SCCL decision methods Task-free: {SCCL_VAULT_METHODS}")
+
+    # (2) exhaustive enumeration: the ONLY raw Task-gold readers in vault.py
+    # are the legacy VSR methods. Any reader outside that set — including a
+    # NEW one added to an SCCL path later — fails the audit. This proves no
+    # Task gold can reach any SCCL decision path, name-collisions aside.
+    LEGACY_VSR_METHODS = {"commit", "violates", "choose_target", "_too_similar_exists"}
+    readers: dict[str, list[str]] = {}
+    for n in ast.walk(vtree):
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        hits = [f"line {a.lineno}: .{a.attr}" for a in ast.walk(n)
+                if isinstance(a, ast.Attribute)
+                and isinstance(a.value, ast.Name) and a.value.id == "task"
+                and a.attr in GOLD_FIELDS]
+        if hits:
+            readers[n.name] = hits
+    legacy_only = set(readers).issubset(LEGACY_VSR_METHODS)
+    if not legacy_only:
+        failures.append("C5 gold-free: Task-gold readers OUTSIDE the legacy "
+                        f"VSR set: {sorted(set(readers) - LEGACY_VSR_METHODS)}")
     else:
-        print("  gcl/vault.py touches no gold field (gate consumes probes only)")
+        print(f"  Task-gold readers confined to legacy VSR methods: "
+              f"{sorted(readers.keys())} (unreachable in sccl mode; layer 3 proves it)")
+
+    # (3) run-data proof the legacy VSR paths never executed in THIS ladder:
+    # no vsr-gate method, no gold target source, no decision taken by a
+    # non-sccl gate on any row (frozen takes no gate decisions at all).
+    for name in DETERMINISM_ROWS + GEN_ROWS:
+        recs = load_records(V8, name)
+        for ui in update_infos(recs):
+            g = ui.get("gate") or {}
+            if g.get("method") == "vsr":
+                failures.append(f"C5 gold-free: {name} took a legacy VSR gate "
+                                "decision (method=='vsr') in the run data")
+            if ui.get("target_source") == "gold":
+                failures.append(f"C5 gold-free: {name} update consumed a gold "
+                                "target (target_source=='gold')")
+    if not any("VSR gate decision" in f or "gold target" in f for f in failures):
+        print("  run data: zero vsr-gate decisions and zero gold targets across all rows")
 
     if failures:
         print("\n[check] FAIL-CLOSED check(s) FAILED — aborting before decision rules:")

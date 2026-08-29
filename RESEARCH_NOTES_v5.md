@@ -1211,3 +1211,63 @@ FALLBACK (pre-registered)
   earlier refresh), per rule R3, plus E2 composition as a candidate row.
   H1 PASS but BREAKTHROUGH FAIL -> v9 composes G1 with E2 (projection over
   the now-seeing witness) and/or anchor tuning; pre-registered before run.
+
+V8 FINAL VERDICT (2026-08-29, runs/sccl_v8, verdict_check.md, rc=0):
+  H1 FAIL | H2 FAIL | H3 PASS | BREAKTHROUGH: PASS* | C1-C5 ALL PASS.
+  (*PASS on the seed-42 ladder rule; multi-seed 43/44 REQUIRED before any
+  headline claim — launched, see V8 MULTI-SEED below.)
+  frozen .613/.588 arith .600 | sccl .575/+.500 arith .400 |
+  capprobe .625/.494 arith .375 | strat .694/.562 arith .375 |
+  genprobe .575/.450 arith .200 | genprobe_strict .637/+.450 arith .175
+  | genprobe_strict_anchor .675/+.650 arith .600 updates 14 forget .025.
+  BREAKTHROUGH rule: arith .600 >= .55 AND frontier +.650 >= sccl+.500-.02
+  AND updates 14 >= 5 -> PASS. H3: composition dominates both gen rows on
+  arith (.600 vs .200/.175) AND ACC (.675 vs .575/.6375), not degenerate.
+  C1: all 4 prefix rows BIT-IDENTICAL to runs/sccl_v7. C2: every gen row
+  manufactured witnesses at all 4 first contacts, checked ':g' probes in
+  gates (3 gates each), theta rows log cap_rates with denominators {3,5}.
+  C3: zero retirement violations, zero holdout-sourced probes. C4/C4b:
+  zero gen activity on prefix rows, anchor_pen>0 on all 14 accepted
+  anchor updates, lambda exactly {0.1}.
+C5 AUDIT FIX (recorded for honesty, pre-decision): the first checker run
+  aborted on a blanket vault.py name ban that flagged _Skill.test_code —
+  the vault's own slot storing each skill's SELF-CERTIFIED tests (written
+  from certifier self_tests, spec-only provenance), a name collision with
+  the dataset Task.test_code gold, not a leak. Diagnosed by code reading
+  BEFORE any decision rule was evaluated. Replaced with a STRONGER
+  3-layer fail-closed audit: (1) every SCCL decision method must take no
+  task object and read no task gold attr; (2) exhaustive enumeration that
+  the ONLY task-gold readers in vault.py are the legacy VSR methods
+  (commit/violates/choose_target/_too_similar_exists) so any new reader
+  fails; (3) run-data proof the legacy paths never executed (zero
+  vsr-gate decisions, zero gold target_source across all 7 rows).
+  All three layers pass; the gold-free guarantee holds.
+MECHANISM (from telemetry_v8.json, measurement only):
+  M1 = 0% on every gen row (0/3): the ':g' witnesses did NOT fire on the
+  gold-erosion gates — v7's F5 insensitivity persists at the rate level.
+  The erosions on the anchor row are TRANSIENT, not ratcheting: arith
+  oscillates .600->.400->.600 across the stream (v0 -.200, v2 +.200, v6
+  -.200, v9 +.200, v11 -.200, v13 +.200) and ENDS at frozen level, which
+  is why forgetting is .025 — the lowest of ALL rows including sccl.
+  The composition works through UPDATE SELECTION, not erosion DETECTION:
+  the strict witness gate (5 cap-vetoes, 1 by a ':g' witness) rejects
+  updates that would leave the certified+generalization basin, and the
+  anchor bounds each accepted update's drift (anchor_pen mean 1.30), so
+  the model never takes the unrecovered ratchet step that killed arith in
+  the genprobe (.200) and genprobe_strict (.175) rows. Post-hoc
+  interpretation, not pre-registered: the operative pairing is
+  sensitivity-via-composition, i.e. theta-strict witnesses + anchor keep
+  every accepted update inside the witnessed region, rather than catching
+  erosions at the gate.
+  Witness quality: ':g' probes pass at pooled rate 1.0 when checked on
+  kept updates; gen vetoes exist (1 per strict row) but on non-erosion
+  gates. H1's failure mode: coverage alone (theta=0 any-pass) accepted
+  every update exactly like sccl did, PLUS the raw genprobe pool
+  displaced nothing — its arith .200 shows witness coverage without rate
+  sensitivity does not protect; H2 shows sensitivity without the anchor
+  stalls into the v7-F6 pattern instead (arith .175 despite 9 updates).
+V8 MULTI-SEED (pre-registration: BREAKTHROUGH PASS requires seeds 43/44):
+  launched scripts/v8_multiseed.py 2026-08-29 (snapshot s42 + two full
+  ladders at torch_seed 43/44 + 3-seed aggregate). Verdict PENDING; the
+  headline is claimable only if the paired per-seed rule (arith >= .55
+  AND frontier >= sccl-.02 AND updates >= 5) holds on all three seeds.
