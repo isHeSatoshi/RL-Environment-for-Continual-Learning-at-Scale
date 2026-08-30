@@ -1407,3 +1407,61 @@ FAIL-CLOSED CHECKS (per seed; scripts/v9_check.py, fail -> abort, no verdict):
 
 COST: 6 rows x 3 seeds; v8 measured ~45 min/row -> ~13.5h total, sequential.
   runs/sccl_v9{,_s43,_s44} + aggregate runs/sccl_v9_seeds. NEVER committed.
+
+V9 FINAL VERDICT (2026-08-31 01:30, runs/sccl_v9_s{42,43,44} +
+  runs/sccl_v9_seeds/{aggregate.json,verdict_check.md}, rc=0):
+  H1 s42:PASS s43:PASS s44:FAIL | H2 ALL PASS | H3 ALL PASS |
+  BREAKTHROUGH: CONFIRMED (H3 at all 3 seeds) | DOMINANCE: CONFIRMED
+  (H2 at all 3 seeds) | PLASTICITY: still fragile (H1 s44 fail ->
+  theta axis exhausted per pre-registration; no interpolated theta).
+  All fail-closed checks C1-C5 passed on ALL seeds (C1 prefix rows
+  bit-identical to the matching v8 run at every seed — including the
+  seed-44 rerun after the crash, an unplanned determinism stress test).
+  THE RESULT: the arith gold holdout ends at 0.600 — the FROZEN
+  no-damage level — at EVERY seed, while still accepting updates:
+    s42 winner sccl_gen2_half      (theta=0.5):  arith .600 ACC .675
+         frontier +.650 forget .025 updates 8 (vs sccl .400/+.500)
+    s43 winner sccl_gen2_majority  (theta=2/3): arith .600 ACC .738
+         (best in the study) frontier +.713 forget .025 updates 10
+         (vs sccl .400/+.613)
+    s44 winner sccl_gen2_majority  (theta=2/3):  arith .600 ACC .675
+         frontier +.650 forget .025 updates 7 (vs sccl .200/+.400)
+  Paired arith advantage over sccl, per seed: +.200/+.200/+.400 for the
+  winning row; EVERY treatment row >= sccl at EVERY seed (dominance,
+  with equality never below). Mean arith .600 across seeds for the
+  per-seed winners (gen2_half .600/.400/.400; gen2_majority
+  .400/.600/.600) vs sccl mean .333. v7's F7 said the no-damage
+  envelope is the base model and is "reachable" — by not learning
+  (updates=1). v9 reaches it WITH 7-14 accepted updates per seed: the
+  envelope is reachable while learning, under the G=2 witness lane +
+  soft rate threshold + anchor composition, at the pre-registered bar.
+  H1 DOSE FINDING (recorded): gen2_majority accepted only 7 updates at
+  s44 (rollbacks 10) — below the >=8 floor. Both dose points sit close
+  to the plasticity cliff on some seeds; per the pre-registered rule
+  the theta ladder stops here and any further strictness tuning moves
+  OFF the rate axis (Branch H below). G=2 rows also cost ~2.1h/row vs
+  ~45min for prefix rows (12 probes/gate at 3 draws) — a scaling note.
+  MECHANISM (telemetry_v8.json per seed dir, measurement only):
+  M1 = 0% on ALL SIX treatment-row-seeds (0/2,0/3,0/3,0/2,0/3,0/1) —
+  across v8+v9, nine row-seeds, witnesses NEVER fire on gold-erosion
+  gates. The operative protection is UPDATE SELECTION: on the s43
+  winner, 7 cap-vetoes (2 by ':g' witnesses) plus the anchor (mean pen
+  1.18) reject updates that leave the certified+witnessed basin, the
+  arith trace oscillates 0.6->0.4->0.6 with every erosion transient
+  and every recovery realized (ends 0.600), and the first gate of the
+  run checked BOTH concurrent witnesses (mbpp_452:g + mbpp_615:g) at
+  pooled gen rate 0.667 — the G=2 lane is live, at theta 2/3 it
+  retains (>= .667) while theta 1.0 would have vetoed. The soft dose
+  converts the same witnesses from stall (v8 s43: 4 updates) into a
+  working filter (s43 v9: 10 updates, arith .600).
+  PROTOCOL NOTE: PC shutdown at ~18:00 on 08-30 crashed seed 44
+  mid-run (2 of 6 rows done); rerun from scratch 18:11-01:30 after
+  quarantining the partial dir (runs/sccl_v9_s44_crashed_0830). Idle
+  ~11 min + ~1.6h compute lost. Seeds 42/43 were already final and
+  untouched. C1 determinism passed on the rerun.
+  NEXT (pre-registered rule applied): BREAKTHROUGH CONFIRMED ->
+  paper headline updated to the 3-seed confirmed claim. H1 residual ->
+  Branch H pre-registration (below): move strictness off the rate axis
+  (certified-manifold trust region / witness-free drift bound) for the
+  plasticity residual; and the scaling limitations (stream, model size)
+  remain the study's stated next frontier.
