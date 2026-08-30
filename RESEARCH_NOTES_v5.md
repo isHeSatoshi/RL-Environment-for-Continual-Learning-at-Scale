@@ -1465,3 +1465,105 @@ V9 FINAL VERDICT (2026-08-31 01:30, runs/sccl_v9_s{42,43,44} +
   (certified-manifold trust region / witness-free drift bound) for the
   plasticity residual; and the scaling limitations (stream, model size)
   remain the study's stated next frontier.
+
+================================================================================
+BRANCH H PRE-REGISTRATION (V10 — ACCEPTED-STATE TRUST REGION) — written
+2026-08-31, BEFORE any v10 implementation or run. Triggered by the
+pre-registered Branch G rule: H1 FAILED at seed 44 (gen2_majority accepted
+7 < 8 updates at theta=2/3) -> the theta axis is EXHAUSTED; the residual
+moves to a mechanism that does not trade protection against accepted
+updates on the rate axis. Committed before implementation, as throughout.
+================================================================================
+
+EVIDENCE BASE (v9, 3 seeds, verdict 6adfaed):
+  - CONFIRMED: arith ends at the frozen no-damage level .600 at every
+    seed with 7-14 accepted updates (H3 all seeds), every treatment row
+    >= sccl at every seed (H2 all seeds).
+  - The residual: theta=2/3 accepted only 7 updates on s44 (10
+    rollbacks). theta=0.5 on s44 accepted 13 but arith fell to .400 —
+    the rate axis IS the protection/plasticity frontier: softer ->
+    more updates -> less protection. No interpolated theta will be run.
+  - Mechanism (9 row-seeds, v8+v9): witnesses never fire on erosion
+    gates (M1=0%); protection is update selection — the veto REJECTS
+    updates that leave the certified+witnessed basin, the anchor bounds
+    the drift of accepted ones. The veto is the plasticity cost.
+  - v7's E2 falsification stands: PROJECTION off probe-loss gradients is
+    dead (a constraint sees the damage direction only if the loss sees
+    it, and it does not). The trust region below anchors WEIGHTS, not
+    probe gradients — it is not E2.
+
+V10 QUESTION (single-variable, off the rate axis):
+  the v9 anchor pulls accepted updates toward the LoRA INIT (a FIXED
+  point that never moves as the model learns). What if the anchor target
+  MOVES WITH LEARNING — a quadratic pull toward the LAST ACCEPTED
+  adapter state (an accepted-state trust region)? Each accepted update
+  is then bounded relative to the most recent certified point, not to
+  the zero state: cumulative drift is bounded along the ACCEPTED PATH
+  without vetoing updates, so plasticity should not pay the veto tax,
+  while protection keeps every accepted step inside a ball around a
+  state the witnesses already certified.
+
+TREATMENT ROWS (anchor target is the ONLY changed variable vs v9 winners;
+  witness lane G=2, doses, stratification, all else identical):
+  v10_tr_s23      : theta=2/3, G=2, trust-region anchor (target = last
+                    accepted adapter state), lambda=0.1.
+  v10_tr_s10      : theta=1.0, G=2, trust-region anchor — tests whether
+                    the moving target restores plasticity at the STRICT
+                    dose that stalled v8 (4 updates at s43) and s44 v9
+                    (7 updates): if the trust region works, the strict
+                    witnesses should veto LESS because accepted steps
+                    stay near the certified manifold.
+  REFERENCE ROW: sccl_gen2_majority re-run is NOT needed — v9's 3-seed
+  numbers are the pre-registered reference (ad7172d rules); C1 prefix
+  rows bit-match runs/sccl_v8 per seed as before.
+  NOTE on the reference design: v10_tr rows differ from v9 winners ONLY
+  in the anchor target; any v10 row may also be compared to the v9
+  winner's per-seed arith (non-inferiority: within .05) with updates
+  strictly greater (the plasticity claim).
+
+PROTOCOL: unchanged from v9 — the 3-seed ladder IS the experiment
+  (seeds 42/43/44 up front, run_seeds.py, no interim decision), wiring
+  smoke + fail-closed audit first, then scripts/v10_check.py per-seed
+  C1-C5 (C1 vs the matching v8 run at each seed) + decision rules below.
+
+DECISION RULES (per seed s in {42,43,44}):
+  H1 (plasticity): every v10_tr row accepts >= 10 updates at s (the v9
+     winners took 8/10/7; the trust region must clear 10, not 8, to
+     count as a mechanism WIN rather than seed luck — a stricter bar,
+     pre-set now).
+  H2 (dominance kept): every v10_tr row arith >= sccl.arith at s.
+  H3 (breakthrough kept): some v10_tr row arith >= .55 AND frontier >=
+     sccl.frontier - .02 AND updates >= 5 at s.
+  H4 (trust-region improvement, the NEW claim): at s, the best v10_tr
+     row's updates >= the v9 winner's updates at s AND its arith >=
+     the v9 winner's arith at s - .05 (non-inferior protection with
+     strictly more learning). H4 at ALL 3 seeds = the trust region
+     beats the static anchor on the frontier it was designed for.
+  V10 VERDICT: H4 all seeds -> the plasticity residual is a MECHANISM
+     property (static anchor), record + paper; H4 fails but H3 holds ->
+     trust region is protective but not plasticity-restoring, record,
+     stop the mechanism axis too; H2/H3 fail -> trust region is harmful,
+     revert to v9 winner as the study's final configuration, record.
+  DEGENERACY GUARD: a v10_tr row < 5 updates at any seed is degenerate
+  there (excluded from that seed's maxima, forces H3 FAIL there).
+  M1 telemetry continues (measurement only; expected 0% by now).
+
+FAIL-CLOSED CHECKS: v9_check.py structure verbatim (per-seed C1 bit-
+  identity vs v8 refs; C2 G=2 lane + dose fields incl. anchor TARGET
+  telemetry — v10 must log anchor_target in {"init","last_accepted"}
+  per accepted update so the trust region is engagement-tested, not
+  just wired; C3 retirement/anti-contamination; C4 isolation + anchor
+  engagement; C5 the 3-layer gold-free audit). NEW for C4b: the
+  trust-region row must log anchor_pen > 0 on every accepted update AND
+  a nonzero last-accepted-state distance after the SECOND accepted
+  update (the target moved — otherwise the trust region silently
+  degenerated to the init anchor, the v4-lesson engagement test).
+
+COST: 6 rows x 3 seeds at v9 pacing (G=2 rows ~2.1h) -> ~14h + smoke.
+  runs/sccl_v10_s{42,43,44}; never committed.
+
+STOP CONDITION (program-level): v10 concludes the mechanism ladder on
+  this stream/model. Whatever the verdict, the NEXT frontier is the
+  stated limitation (single 3B model, one small stream): scaling the
+  stream length, model size, and seed count — a new pre-registration
+  with its own cost plan, not another mechanism branch.
