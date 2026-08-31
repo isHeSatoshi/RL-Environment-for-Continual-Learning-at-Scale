@@ -1669,3 +1669,152 @@ unclaimed terms; safe to define and own.
 
 Sweep archived: this section is the record; no runs/ artifacts created
 by the sweep (search-only, no code changes).
+
+---
+
+## PUBLICATION PROGRAM PLAN (pre-registration DRAFT, 2026-08-31)
+
+STATUS: DRAFT for resource sign-off (disk + second-model choice); every
+run below gets its own committed pre-registration + fail-closed checker
+BEFORE launch, per protocol. No run starts under this plan until its
+row set, seeds, and decision rules are committed.
+
+### A. WHERE WE GENUINELY ARE (inventory, all artifact-verified)
+HAVE:
+  - Confirmed 3-seed result (v9): winner rows hold arith holdout at the
+    frozen no-damage level (0.600) at ALL 3 seeds while accepting
+    7-14 updates; math 0.250 -> up to 0.750; ACC up to 0.738; lowest
+    forgetting in study (0.025). Breakthrough + dominance bars met at
+    every seed (ad7172d rules, verdict_check.md).
+  - Novelty verdict (this file, 2026-08-31): combination unclaimed;
+    closest works OPR-SC / ACE / CPR read and distinguished; name
+    collision with arXiv 2503.10503 documented; "Self-Replay Veto" and
+    "generalization witnesses" unclaimed terms.
+  - Mechanism identified across 9 row-seeds: protection = update
+    selection (M1 = 0%); gate-level erosion detection does NOT fire.
+    Honest finding, to be reported as such.
+  - Infrastructure: fail-closed C1-C5 audits, anti-contamination
+    canaries, holdout isolation, stream hash 554ce43f182b, 111 tests,
+    pre-registration discipline with real commit chain (ad7172d,
+    8aaf8b0), standard metrics already computed per row (report keys:
+    acc, bwt, fwt, forgetting, auc, stability).
+  - Measured cost basis (RTX 4060 Ti 16GB, v9): full 6-row ladder
+    4.3-7.0 h/seed; frozen 0.11-0.24 h; sccl 0.29-0.78 h; winner
+    gen2 rows 0.57-2.09 h. Run dir ~0.9-1.1 GB, of which adapters
+    ~78% (retention policy cuts this 5-10x).
+
+MISSING for a top ML venue (reviewer kill-list, ranked):
+  K1. NO external baselines. All comparisons are internal ladder rows.
+      A NeurIPS/ICML reviewer rejects on this alone. Need: joint
+      multitask gold upper bound, sequential gold SFT, gold replay
+      rehearsal, EWC, O-LoRA (LoRA-native, must-have), OPR-SC-style
+      on-policy replay (closest neighbor, must-have).
+  K2. Scale: 1 model, 32-task/4-family stream, 3 seeds. Need >= 5
+      seeds (10 on the headline trio for paired stats), a second model
+      FAMILY, and a longer stream.
+  K3. "Is it the gate or just LoRA being stable?": ablations exist as
+      ladder rows but must be run on the final stream/model/seed count,
+      plus a no-veto row (veto computed, logged, never applied) and an
+      oracle-gate DIAGNOSTIC row (gold tests in the gate, clearly
+      labeled non-SCCL reference) to price self-certification vs oracle.
+  K4. Joint multitask upper bound absent (CPR-style MTRL reference).
+  K5. Writing: lab-report chronology -> evidence-first paper; rename
+      (name collision); verified related-work section; limitations
+      section incl. M1=0% and single-model origin.
+
+### B. THE PROGRAM (measured costs; all estimates extrapolated from
+### v9 per-row wall times, stated as ranges)
+P0 UNBLOCK (dev only, ~1-2 days, no GPU sweep):
+  - Disk: 12 GB free now. Program needs ~15-25 GB with retention.
+    Action (non-destructive): compress superseded runs (sccl_main,
+    v2-v7 ladders, smokes ~9 GB -> ~3-4 GB .tar.zst kept on D: or
+    moved off-drive), delete the dead crashed quarantine (283 MB,
+    created by us). v8/v9 evidence dirs (6 GB) stay untouched.
+    Optional user decision: point at another drive for the archive.
+  - Adapter retention policy: keep final (+first) adapter per row,
+    prune intermediates -> run dirs ~150-250 MB.
+  - Baselines module (in-harness, same stream/eval): joint-MT gold,
+    seq-SFT gold, replay-gold, EWC, O-LoRA, OPR-SC-style replay.
+  - Second model: granite-3b-code-instruct (different family, instruct,
+    3B, fits 16 GB) config + wiring smoke; fallback
+    deepseek-coder-1.3b-instruct if its zero-shot is unusable.
+    Optional cheap extra: Qwen2.5-Coder-1.5B scale-ablation row.
+  - Standard-metrics table extractor (report keys already exist).
+
+P1 BASELINE SWEEP (K1+K4): current 32-task stream, 6 baseline rows
+  x 5 seeds. Est ~4 h/seed x 5 = ~20-25 GPU-h.
+
+P2 SEED POWER (K2): core trio {frozen, sccl(no-gate), gen2_majority}
+  x 10 seeds on the 32-task stream (the paired-stats headline).
+  Est ~1.75 h/seed x 10 = ~17.5 GPU-h.
+
+P3 LONG STREAM (K2): extend stream generator to 8 families / 64 tasks
+  (new stream hash, pre-registered; add e.g. mbpp list/loop slices +
+  second math flavor). Core trio + top-2 baselines x 5 seeds.
+  Est ~6.5 h/seed x 5 = ~33 GPU-h.
+
+P4 SECOND MODEL (K2): granite-3b-code-instruct, core trio + 2 strongest
+  baselines x 5 seeds. Est ~3.2 h/seed x 5 = ~16 GPU-h.
+
+P5 DIAGNOSTICS (K3): no-veto row x 5 seeds (~5 h); oracle-gate
+  diagnostic row x 5 seeds (~5 h, gold in gate ONLY here, labeled
+  non-SCCL reference — the loop constraint is untouched for all
+  claimed rows).
+
+P6 ANALYSIS + WRITING: paired stats (Wilcoxon + bootstrap CI over
+  10-seed trio; means +- CI everywhere), figures (per-seed curves,
+  frontier-vs-updates, veto timelines, M1 panel), evidence-first paper
+  rebuild, related work (verified list), limitations, code release
+  package (runs/ excluded). Internal mock review against K1-K5.
+
+TOTAL: ~120-150 GPU-h (smokes/dev included). At 8-12 h/day usable on
+one 4060 Ti: ~2 weeks pure GPU, 4-6 weeks wall clock with dev+writing.
+
+### C. VENUE MATH (honest)
+  ICLR 2027 (~late Sept 2026): 3.5 weeks away. Would force exactly the
+  corner-cutting this project refuses. SKIP.
+  ICML 2027 (~late Jan 2027): ~5 months. PRIMARY TARGET — full program
+  + writing + one failure buffer.
+  COLM 2027 (~March 2027): LLM-venue fallback.
+  NeurIPS 2027 (~May 2027): comfortable target if we also add the v10
+  mechanism axis + optional 7B stretch.
+
+### D. PRE-REGISTERED CLAIM STRUCTURE (paper)
+  PRIMARY: winner row arith holdout >= frozen no-damage level at
+    >= 4/5 seeds on the 64-task stream (10-seed trio on 32-task as
+    the power run), paired CI vs sccl (no-gate).
+  SECONDARY: ACC >= best gold-using baseline on the stream (dominance);
+    lowest forgetting of all rows.
+  REPORTED NOT CLAIMED: accepted-update counts (plasticity), gate veto
+    rates, oracle-vs-self gate gap.
+  FALLBACK framings (pre-set now): if a gold baseline ties on ACC,
+    the claim is "zero-gold matches gold-hungry CL on protection" —
+    still a strong result because it removes the label dependency.
+
+### E. v10 (Branch H): PARKED behind this program, with rationale.
+  H1 showed the theta dose axis exhausted; plasticity is a reported
+  observation, not a claimed mechanism. If the program lands early,
+  v10 runs as an appendix mechanism study (~14 h, rules already
+  committed at 8aaf8b0).
+
+### F. NO-SLOP OPERATING RULES (binding for every phase)
+  1. Pre-registration committed BEFORE each run; no post-hoc row edits.
+  2. All seeds reported; no seed selection.
+  3. No metric switching after results; primary metric fixed in D.
+  4. Negative results kept in the paper (v8 s43 H-fails; M1=0%;
+     any baseline that beats us is reported in the main table).
+  5. Every number traceable to a committed artifact + checker.
+  6. Fail-closed checker adapted per sweep; C5 gold-free audit runs
+     on every claimed row.
+  7. Related-work claims only from papers we actually read.
+  8. Claims sized to evidence; limitations state single-model origin,
+     stream construction, and the update-selection mechanism honestly.
+
+### G. GATING DECISIONS NEEDED (user)
+  G1. Disk unblock approval: compress-and-keep (non-destructive,
+      reversible) of superseded v1-v7/smoke runs + delete the 283 MB
+      crashed quarantine we created. [blocking P1+]
+  G2. Second model confirmation: granite-3b-code-instruct (default)
+      or another family instruct model <= 3B.
+  G3. Venue target confirmation: ICML 2027 (default).
+On "go", P0 starts immediately; P1 launches as soon as P0 lands.
