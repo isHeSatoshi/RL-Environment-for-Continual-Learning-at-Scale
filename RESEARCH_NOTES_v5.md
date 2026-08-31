@@ -1567,3 +1567,105 @@ STOP CONDITION (program-level): v10 concludes the mechanism ladder on
   stated limitation (single 3B model, one small stream): scaling the
   stream length, model size, and seed count — a new pre-registration
   with its own cost plan, not another mechanism branch.
+
+---
+
+## NOVELTY SWEEP (2026-08-31): does this already exist? — FINAL VERDICT
+
+SOURCES (all reached 2026-08-31): OpenAlex API (works search + abstract
+inverted index), arXiv abstract pages via web fetch, and web search.
+Endpoints blocked by the sandbox (Semantic Scholar API 429, arXiv API
+socket timeout) were worked around via OpenAlex + page fetches; two
+independent research-agent sweeps (label-free CL for LLMs; exact-term
+web sweep) plus direct verification of every load-bearing claim by the
+lead agent. Agent 2 (self-tests-as-gates territory) hung >2h and was
+stopped; its territory was closed by direct OpenAlex queries
+("self-generated tests continual learning", "test-driven continual
+learning language model", "rollback gate catastrophic forgetting LoRA",
+"self-certification reward language model training", "unit tests
+training signal code generation without labels") — all top hits are
+generic surveys with zero relevant matches.
+
+### WHAT WE CLAIM (the thing searched for)
+A continual-learning system for code LLMs in which BOTH:
+  (a) the training targets are self-generated and self-certified from
+      the spec alone (no gold solutions in the learning loop), AND
+  (b) the forgetting-protection gate consumes only self-certified
+      artifacts: the Self-Replay Veto regenerates prior solutions
+      under the updated adapter and checks them against the vault's
+      stored SELF-MADE tests — gold appears nowhere in the
+      accept/rollback decision; gold is only touched by final
+      evaluation and post-hoc telemetry.
+Plus (c) generalization witnesses: ':g' capability probes manufactured
+from UNTRAINED future stream tasks, retired before their source task
+trains, used to certify cross-family transfer without gold.
+
+### VERDICT: THE COMBINATION DOES NOT EXIST IN PRIOR ART
+Searched: OpenAlex (dozens of query variants), arXiv pages, web sweep.
+No work found that combines gold-free training targets + a self-test-
+driven rollback gate + task-stream continual learning for code LLMs.
+Each individual axis has neighbors; the intersection is unclaimed.
+
+### PER-COMPONENT PRIOR-ART TABLE
+| Component | Nearest prior art | What they do | Missing vs ours |
+|---|---|---|---|
+| Self-generated tests as supervision, no gold | CodeT (arXiv 2207.10397); ACE (2605.16299, VERIFIED); SelfCodeAlign (2410.24198); CodeRM-8B (2501.01054); UTRL (2508.21107) | self-made tests select/filter training data; ACE: "no ground-truth code or external reward models", 3-7% pass@1 gain | ALL are single-session/self-evolving, NOT task streams; no forgetting protection; no rollback |
+| Self/on-policy replay in a continual loop | OPR-SC (2605.29495, VERIFIED: on-policy replay for continual SFT, TRACE, BWT -13.93→-0.65); CPR (2608.18574, VERIFIED: Continual Reasoning Gym + Continual Prompt Replay); LAMOL (1909.03329); DGR (1705.08690) | replay model's own responses to old prompts under the current policy | OPR-SC filters with a task reward, no gate, no tests, not code-specific; CPR uses RLVR = gold verifiable rewards; none certifies replay with self-made tests; none rolls back |
+| Forgetting gate/rollback | EWC/L2-SP/GEM/A-GEM (param/output constraints, most need gold); O-LoRA (2310.14152)/OPLoRA (2510.13003) param-space regularization for code-LLM CL; SafeLoRA; Regression Bugs (ACL 2021, VERIFIED: measurement + constrained distillation) | regularize or constrain the update | none uses self-generated tests as the accept/rollback criterion; none is a post-update veto the learner can pass/fail on its own artifacts |
+| Tests from UNTRAINED future tasks as witnesses | NOT FOUND anywhere | — | concept unclaimed; the exact-term sweep found zero matches |
+| Skill libraries with self-tests | SKILLFOUNDRY/SkillAxe/Ratchet (2026), Voyager | bank skills validated by generated tests | crowded axis; none protects a task stream against forgetting via a gate; no gold-free CL claim |
+| "Self-Certified Continual Learning" (name) | arXiv 2503.10503 (VERIFIED) | CoP2L sample-compression bounds, vision class-incremental | NAME COLLISION: different mechanism entirely (no LLMs, no tests, no rollback) — cite + distinguish or rename |
+
+### CLOSEST THREE WORKS (each verified by reading its abstract)
+1. OPR-SC — "On-Policy Replay for Continual Supervised Fine-Tuning"
+   (arXiv 2605.29495). Closest on the replay axis: replays the model's
+   own filtered responses to historical prompts during continual SFT;
+   no teacher, no distillation. BUT: filtering uses a task reward (not
+   self-made tests), there is no accept/rollback gate, and it is not
+   code-specific. Our replay lane is certified by self-tests and the
+   gate vetoes updates that break certified behavior.
+2. ACE — adversarial unit-test self-evolution (arXiv 2605.16299).
+   Closest on the supervision axis: one model alternates
+   solver/adversary, supervision solely from execution, "no
+   ground-truth code or external reward models". BUT: single-session
+   self-improvement; no task stream; no forgetting protection; no
+   rollback. Our witnesses inherit this spirit but wrap it inside a
+   lifelong gate.
+3. CPR — Continual Prompt Replay in the Continual Reasoning Gym
+   (arXiv 2608.18574). Closest on the SETTING axis: a continual-RLVR
+   environment over reasoning task sequences, replaying old prompts and
+   regenerating responses with the current policy; only CPR reaches
+   MTRL-level performance. BUT: RLVR rewards are gold verifiers; no
+   gate; no self-certification. Our environment is the code analogue
+   with the gold wire deliberately cut.
+
+### HONEST BREAKTHROUGH ASSESSMENT
+NOVEL (defensible now): the intersection — a gold-free continual
+learning loop whose forgetting protection is itself gold-free (self-
+replay veto against stored self-tests), plus generalization witnesses
+drawn from untrained future tasks. Multi-seed pre-registered evidence:
+arith holdout held at the frozen no-damage level (0.600) at ALL 3 seeds
+while accepting 7-14 updates; math family lifted 0.0→0.5-0.75; lowest
+forgetting in the study (0.025); best ACC (0.738). Mechanism identified
+across 9 row-seeds: update selection (M1 = 0%), not gate-level erosion
+detection — recorded as an honest limitation/finding.
+NOT YET CLAIMABLE: top-conference "breakthrough" needs the scaling
+frontier — more seeds, a second model family, a longer stream
+(pre-registered as the next program step after Branch H). Current
+evidence is 3 seeds x 1 model (Qwen2.5-Coder-3B) x 16 tasks.
+POSITIONING RISK: the skill-library-with-tests axis (SKILLFOUNDRY/
+SkillAxe/Ratchet/Voyager) is crowded — the paper must lead with the
+GOLD-FREE GATE + forgetting result, not with skill banking.
+
+### NAMING (action item)
+"Self-Certified Continual Learning" is TAKEN (arXiv 2503.10503,
+different mechanism). Recommendation: keep SCCL as the internal system
+name; in the paper, title it around the unclaimed compound phrase —
+e.g. "Gold-Free Continual Learning via Self-Certified Replay" — and
+cite 2503.10503 in related work with an explicit one-sentence
+distinction (compression bounds for vision vs self-test rollback gate
+for code LLMs). "Self-Replay Veto" and "generalization witnesses" are
+unclaimed terms; safe to define and own.
+
+Sweep archived: this section is the record; no runs/ artifacts created
+by the sweep (search-only, no code changes).
