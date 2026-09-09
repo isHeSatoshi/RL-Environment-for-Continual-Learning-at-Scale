@@ -152,7 +152,7 @@ gcl_smoke.py                    Fast 30-second single-GPU smoke test
 
 ```bash
 # Clone the repository
-git clone https://github.com/AdityaProCoder/RL-Environment-for-Continual-Learning-at-Scale.git
+git clone https://github.com/isHeSatoshi/RL-Environment-for-Continual-Learning-at-Scale.git
 cd RL-Environment-for-Continual-Learning-at-Scale
 
 # Create virtual environment and install in editable mode
@@ -356,7 +356,7 @@ If you use OpenContinualEnv or GCL in your research, please cite our repository:
   year = {2026},
   publisher = {GitHub},
   journal = {GitHub repository},
-  howpublished = {\url{https://github.com/AdityaProCoder/RL-Environment-for-Continual-Learning-at-Scale}}
+  howpublished = {\url{https://github.com/isHeSatoshi/RL-Environment-for-Continual-Learning-at-Scale}}
 }
 ```
 
