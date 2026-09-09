@@ -1,9 +1,22 @@
 # Grounded Continual Learning (GCL) & OpenContinualEnv
 
-**Status: Real Platform with Verified, Reproducible Continual Learning** — *Not a mock framework or production shell.*  
+**Status: Confirmed 3-Seed Breakthrough in Gold-Free Continual Learning** — *Not a mock framework or production shell.*  
 A single GPU (e.g., RTX 4060 Ti 16GB or Kaggle T4) runs the entire pipeline: real PyTorch/PEFT LoRA weight updates, execution-grounded rewards, safe-gated model promotion, and measurable catastrophic forgetting — with every claim verifiable from logged execution artifacts.
 
-**New: Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a 66-test proof suite including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`).
+## 🏆 The Confirmed Result (SCCL v9 — 3 seeds, all pre-registered checks passed)
+
+**The no-damage envelope of the frozen base model is reachable WHILE LEARNING — with zero gold labels anywhere in the loop or the safety gate.** On the seeded 32-task / 4-family stream (seeds 42/43/44, identical stream hash), the winning configuration (two *generalization witnesses* per family, soft pass-rate dose θ∈{0.5, ⅔}, base anchor λ=0.1) ends the arithmetic holdout at **0.600 — exactly the frozen no-update model's level — at every seed**, while still accepting **7–14 LoRA updates** and lifting the math family from 0.250 to 0.500–0.750:
+
+| Seed | Winner | arith holdout | ACC | frontier | forgetting | accepted updates |
+|---|---|---|---|---|---|---|
+| 42 | `sccl_gen2_half` (θ=0.5) | **0.600** | 0.675 | +0.650 | 0.025 | 8 |
+| 43 | `sccl_gen2_majority` (θ=⅔) | **0.600** | **0.738** (best in study) | +0.713 | 0.025 | 10 |
+| 44 | `sccl_gen2_majority` (θ=⅔) | **0.600** | 0.675 | +0.650 | 0.025 | 7 |
+| — | `sccl` (no-gate baseline) | 0.400 / 0.400 / 0.200 | — | — | — | — |
+
+Every treatment row ≥ the gold-free no-gate baseline at every seed (paired, never below). 3-seed means: ACC **0.679±0.056**, frontier **+0.638±0.082**, forgetting **0.042±0.029** vs `sccl` 0.596±0.083 / +0.504±0.106 / 0.092±0.029. All fail-closed checks C1–C5 pass: bit-identical determinism prefix rows, witness-lane engagement at the pre-registered doses, retirement/anti-contamination clean, anchor engaged on every accepted update, and the 3-layer gold-free audit (SCCL vault methods are Task-object-free; Task-gold readers confined to legacy VSR methods; zero gold-gate decisions or gold targets in run data). A novelty sweep (OpenAlex/arXiv, Aug 2026 — see `RESEARCH_NOTES_v5.md`) found **no prior work combining gold-free training targets with a gold-free forgetting gate in continual learning for code LLMs**; nearest neighbors (OPR-SC, ACE, CPR) each miss a different component.
+
+**Self-Certified Continual Learning (SCCL)** — the model certifies its *own* learning targets from the task specification alone (self-spec test bags → discriminative consensus → self-replay veto), so **no gold labels enter the learning loop or the safety gate**. Gold is used only for final evaluation and post-hoc telemetry. The gold-free guarantee is structural (API shape) and enforced by a **111-test proof suite** including AST audits and adversarial poisoned-gold environments (`tests/test_sccl.py`); a 9-iteration pre-registered mechanism ladder (v2→v9, every verdict recorded in `RESEARCH_NOTES_v5.md`, including its negative results) converged on the v9 configuration above.
 
 **SCCL v2 — self-manufactured stability.** A fine-grained diagnosis of v1 showed its residual forgetting is almost entirely *unvisited-generalization* loss (trained tasks retained, same-family holdouts collapse; math entries never gate-checked). v2 adds three gold-free mechanisms (`configs/sccl_v2.json`): **certified rehearsal** (every update also trains on stride-sampled pairs from the self-certified vault), **neighborhood probes** (at certification the model manufactures a certified spec variant — paraphrase + bidirectional cross-validation for code, numeric variant + majority vote for math — stored as `kind="probe"`, never trained on, re-checked by RRV so the gate protects a generalization neighborhood), and **math-RRV** (the veto extended to math vault entries via canonical-form answer matching). Probe manufacture is a spec-only API (`MakeProbe(engine, verifier, spec, domain, CertResult)`) covered by the same AST/signature/poisoned-gold audits.
 

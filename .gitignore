@@ -41,3 +41,4 @@ paper/*.aux
 paper/*.log
 paper/*.out
 paper/compile.log
+.tmp_search/
